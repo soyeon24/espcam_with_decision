@@ -134,6 +134,27 @@ for name, pose, seconds, want in CASES:
           f"{p.get('recline', 0):5.2f} {p.get('drowsy', 0):5.2f}"
           f"{'' if ok else '   <-- FAIL'}")
 
+# A real nod takes the whole upper body with it, so apparent size dips while the
+# head is down and the distance axis reads that as leaning away. Recline sits
+# first in the label order, so without a sustain requirement that spike takes the
+# label off somebody falling asleep. Every frame has to be checked, not just the
+# last one - the spike only exists while the head is down.
+tr, t = calibrated()
+seen, peak = collections.Counter(), 0.0
+for i in range(int(40 * FPS)):
+    t += 1 / FPS
+    s = i / FPS
+    v = tr.update(es.mask_to_zone(
+        person(head_row=nod(s), scale=0.72 if (s % 6.0) < 2.0 else 1.0)), t)
+    seen[v.label] += 1
+    peak = max(peak, v.parts.get("recline", 0.0))
+print()
+print(f"nod with body sway: peak recline {peak:.2f}, "
+      f"{seen['RECLINE']}/{sum(seen.values())} frames read as RECLINE")
+if seen["RECLINE"] or not seen["DROWSY"]:
+    failed += 1
+    print("   <-- FAIL: a nod must not read as reclining")
+
 # Waking up has to clear quickly; the 30 s counting window would otherwise hold
 # DROWSY on screen long after the nodding stopped.
 tr, t = calibrated()
