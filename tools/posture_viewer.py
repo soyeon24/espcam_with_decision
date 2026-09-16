@@ -1,4 +1,13 @@
-"""54x42 필드와 자세 판정을 한 화면에 띄운다.
+#!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["pyserial", "numpy", "opencv-python"]
+# ///
+"""54x42 필드와 자세 판정을 한 화면에 띄운다. 판정까지 하는 도구는 이것 하나다.
+
+viewer.py 는 파이프라인을 눈으로 튜닝하는 도구라 mask·skeleton 을 원본 그대로
+흑백으로 그리고 판정은 하지 않는다. 이 파일이 그 튜닝 키를 그대로 들고 오면서
+열화상 표시와 자세 판정을 함께 한다.
 
 왼쪽: 센서가 보내는 coverage 필드를 열화상 팔레트로 그린 것(배경과 다를수록 뜨겁게).
       v 를 누르면 판정이 실제로 쓰는 zone 거리 배열로 바꿔 볼 수 있다.
@@ -16,12 +25,14 @@
 화면에 찍는 글자는 전부 ASCII 다 — cv2.putText 는 한글을 그리지 못한다.
 
 Keys:
-    SPACE  현재 단계 진행 (1단계 카운트다운 중 다시 누르면 즉시 캡처)
-    n      배경 다시           b  자세 baseline 다시
-    v      coverage / zone 전환   a  coverage 대비 스트레치
-    c      팔레트 순환         g  격자 on/off
-    1/2/3/4  실측 라벨 기록 (upright/slump/recline/drowsy)   0  기록 정지
-    p      스냅샷 저장          q / ESC  종료
+  단계   SPACE 다음 단계 (1단계 카운트다운 중 다시 누르면 즉시 캡처)
+         n 배경 다시      b 자세 baseline 다시
+         1/2/3/4 실측 라벨 기록 (upright/slump/recline/drowsy)   0 기록 정지
+  화면   v 레이어 (coverage / zone / mask / skeleton)   c 팔레트
+         a 대비 스트레치   g 격자   s 스냅샷 저장   p 카메라 사진 창
+  보드   [ ] 임계값   o O opening   h 홀 필링   i invert
+         - = 차분 게인   , . 노출   x 자동노출   / 상태 출력
+  q / ESC  종료
 """
 from __future__ import annotations
 
@@ -49,6 +60,10 @@ PANEL_MIN_H = 705    # 패널 내용이 다 들어가는 최소 높이. 더 짧�
 TAG_KEYS = {ord("1"): "upright", ord("2"): "slump", ord("3"): "recline",
             ord("4"): "drowsy"}
 NEAR_MM, FAR_MM = 450.0, 2600.0
+
+# 왼쪽에 그릴 수 있는 것들. zone 은 항상 있고(판정이 쓰는 배열이다), 나머지는
+# 센서가 보내줄 때만 있다 — 웹캠 스텁에는 skeleton 이 없다.
+LAYERS = ("coverage", "zone", "mask", "skeleton")
 
 STEP_BACKGROUND, STEP_BASELINE, STEP_LIVE = range(3)
 STEP_PROMPT = {
@@ -117,6 +132,17 @@ def _bar(img, org, width, value, color):
     if filled > 0:
         cv2.rectangle(img, (x, y), (x + filled, y + 11), color, -1)
     cv2.rectangle(img, (x, y), (x + width, y + 11), (95, 95, 100), 1)
+
+
+def render_plain(img: np.ndarray, cell: int, grid: bool) -> np.ndarray:
+    """mask·skeleton 처럼 0/255 뿐인 레이어. 팔레트를 씌워도 2색이라 의미가 없으므로
+    viewer.py 와 같이 흑백 그대로 그린다."""
+    out = cv2.resize(cv2.cvtColor(img, cv2.COLOR_GRAY2BGR),
+                     (img.shape[1] * cell, img.shape[0] * cell),
+                     interpolation=cv2.INTER_NEAREST)
+    if grid:
+        sensor_grid(out, cell)
+    return out
 
 
 def render_panel(verdict: PostureVerdict, height: int, *, step: int,
@@ -194,18 +220,25 @@ def render_panel(verdict: PostureVerdict, height: int, *, step: int,
           (110, 220, 110) if bg_ready else (60, 210, 245))
     _text(p, f"baseline   {'ok' if base_ready else 'not set'}", (16, height - 36), 0.43,
           (110, 220, 110) if base_ready else (60, 210, 245))
-    _text(p, f"{fps:4.1f} fps   SPACE next  n bg  b base  q quit", (16, height - 14), 0.4,
-          (140, 140, 145))
+    _text(p, f"{fps:4.1f} fps  SPACE next  n bg  b base  v layer  q quit",
+          (16, height - 14), 0.4, (140, 140, 145))
     return p
 
 
 def compose(depth_mm, verdict, *, step=STEP_LIVE, palette=0, cell=14, grid=False,
-            bg_ready=False, base_ready=False, fps=0.0, coverage=None,
+            bg_ready=False, base_ready=False, fps=0.0, layers=None, layer="coverage",
             stretch=True, link=None, step_hint=None) -> np.ndarray:
-    # coverage 가 있으면 그걸 그린다. 판정이 쓰는 zone 배열은 mask 를 거리로 되돌린
-    # 것이라 값이 두 개뿐이고, 팔레트를 씌워도 2색 실루엣밖에 안 나온다.
-    zones = (render_coverage(coverage, palette, cell, grid, stretch)
-             if coverage is not None else render_zones(depth_mm, palette, cell, grid))
+    # 기본은 coverage 다. 판정이 쓰는 zone 배열은 mask 를 거리로 되돌린 것이라 값이
+    # 두 개뿐이고, 팔레트를 씌워도 2색 실루엣밖에 안 나온다.
+    img = (layers or {}).get(layer)
+    if layer == "zone" or img is None:
+        zones, shown = render_zones(depth_mm, palette, cell, grid), "zone"
+    elif layer == "coverage":
+        zones, shown = render_coverage(img, palette, cell, grid, stretch), "coverage"
+    else:
+        zones, shown = render_plain(img, cell, grid), layer
+    # 어느 레이어를 보고 있는지 항상 적어 둔다. 없어서 화면을 오해하기 쉬웠다.
+    _text(zones, shown, (8, 20), 0.45)
     height = max(zones.shape[0], PANEL_MIN_H)
     if zones.shape[0] < height:            # zone 맵이 짧으면 위아래로 여백을 준다
         pad = height - zones.shape[0]
@@ -215,6 +248,29 @@ def compose(depth_mm, verdict, *, step=STEP_LIVE, palette=0, cell=14, grid=False
     panel = render_panel(verdict, height, step=step, bg_ready=bg_ready,
                          base_ready=base_ready, fps=fps, link=link, step_hint=step_hint)
     return np.hstack([zones, panel])
+
+
+def list_ports() -> None:
+    """붙어 있는 포트를 찍고 어느 쪽이 Vision Stream 인지 짚어 준다.
+
+    보드는 CDC 두 개짜리 복합 장치라 두 포트가 같은 설명을 달고 나온다. 인터페이스
+    번호만이 둘을 가르고, Windows 는 그걸 MI_nn 또는 LOCATION 끝자리로 적는다.
+    """
+    import re
+    import serial.tools.list_ports as lp
+
+    print("사용 가능한 포트:")
+    for p in lp.comports():
+        hwid = (p.hwid or "").upper()
+        role = ""
+        if "1209:0001" in hwid or "1209&PID_0001" in hwid:
+            m = re.search(r"MI_(\d+)", hwid) or re.search(r"LOCATION=\S*[.](\d+)", hwid)
+            itf = int(m.group(1)) if m else None
+            if itf == 0:
+                role = "   <- 브리지(esptool). 이거 말고"
+            elif itf == 2:
+                role = "   <- Vision Stream. 이걸 --port 에 주세요"
+        print(f"  {p.device:10s} {p.description}{role}")
 
 
 def main() -> None:
@@ -237,7 +293,8 @@ def main() -> None:
     # 어느 쪽인지 알 필요가 없다.
     if args.source == "esp":
         if not args.port:
-            ap.error("--source esp 는 --port 가 필요하다 (예: --port COM8)")
+            list_ports()      # 어느 포트인지가 첫 관문이라, 틀렸다고만 하지 않는다
+            ap.error("--source esp 는 --port 가 필요하다 (예: --port COM5)")
         from esp_source import EspZoneSource
         stub = EspZoneSource(args.port, args.baud)
     else:
@@ -249,7 +306,10 @@ def main() -> None:
 
     outdir = Path(args.outdir)
     palette, grid = 0, False
-    show_cov, stretch = True, True
+    layer, stretch = 0, True          # LAYERS 인덱스
+    # 보드에 보낼 값의 거울. 보드가 실제로 들고 있는 값은 '/' 로 확인한다.
+    threshold, opening, fill, invert = 40, 1, True, False
+    gain, exposure, auto_exp, preview = 16, 300, False, False
     bg_phase, bg_at, bg_marks = None, 0.0, 0   # None / "clear" / "settle"
     fps, last = 0.0, time.perf_counter()
     tag, log_rows = None, []
@@ -311,6 +371,9 @@ def main() -> None:
                     "phi": f"{verdict.phi:.3f}", "delta": f"{verdict.delta:.3f}",
                 })
 
+            pics = {"coverage": stub.coverage, "mask": stub.mask,
+                    "skeleton": stub.skeleton}
+
             # 링크 상태. 멈춰도 마지막 프레임이 계속 그려지므로 화면만 보고는 모른다.
             if stub.error:
                 link = (False, f"link down: {stub.error}")
@@ -324,11 +387,18 @@ def main() -> None:
                              cell=args.cell, grid=grid,
                              bg_ready=tracker.background.captured,
                              base_ready=tracker.baseline is not None, fps=fps,
-                             coverage=stub.coverage if show_cov else None,
+                             layers=pics, layer=LAYERS[layer],
                              stretch=stretch, link=link, step_hint=step_hint)
             if tag:
                 _text(canvas, f"REC {tag}  ({len(log_rows)})", (16, 28), 0.6, (70, 70, 245), 2)
             cv2.imshow("posture from zone map", canvas)
+
+            # 렌즈가 가려졌는지 노출이 날아갔는지는 이 창에서만 보인다. 한 장에
+            # ~208ms 를 먹으므로 켜 둔 동안 판정 스트림이 느려진다.
+            if preview and stub.preview is not None:
+                shot = cv2.resize(stub.preview, None, fx=4, fy=4,
+                                  interpolation=cv2.INTER_NEAREST)
+                cv2.imshow("camera", cv2.cvtColor(shot, cv2.COLOR_GRAY2BGR))
 
             key = cv2.waitKey(1) & 0xFF
             if key in (ord("q"), 27):
@@ -363,15 +433,62 @@ def main() -> None:
                 palette = (palette + 1) % len(PALETTES)
             elif key == ord("g"):
                 grid = not grid
-            elif key == ord("v"):
-                show_cov = not show_cov
             elif key == ord("a"):
                 stretch = not stretch
-            elif key == ord("p"):
+            elif key == ord("v"):
+                # 센서가 안 보내주는 레이어는 건너뛴다. zone 은 항상 있다.
+                for _ in range(len(LAYERS)):
+                    layer = (layer + 1) % len(LAYERS)
+                    if LAYERS[layer] == "zone" or pics.get(LAYERS[layer]) is not None:
+                        break
+                print(f"레이어: {LAYERS[layer]}")
+            elif key == ord("s"):
                 outdir.mkdir(parents=True, exist_ok=True)
                 path = outdir / f"posture_{time.strftime('%Y%m%d_%H%M%S')}.png"
                 cv2.imwrite(str(path), canvas)
                 print(f"saved {path}")
+
+            # --- 보드 튜닝. 값은 절대값으로 보낸다 (viewer.py 와 같은 문자열) ---
+            elif key == ord("["):
+                threshold = max(0, threshold - 5);    stub.send(f"t{threshold}")
+                print(f"threshold {threshold or 'auto(otsu)'}")
+            elif key == ord("]"):
+                threshold = min(255, threshold + 5);  stub.send(f"t{threshold}")
+                print(f"threshold {threshold}")
+            elif key == ord("o"):
+                opening = max(0, opening - 1);        stub.send(f"o{opening}")
+            elif key == ord("O"):
+                opening = min(4, opening + 1);        stub.send(f"o{opening}")
+            elif key == ord("h"):
+                fill = not fill;      stub.send(f"h{1 if fill else 0}")
+            elif key == ord("i"):
+                invert = not invert;  stub.send(f"i{1 if invert else 0}")
+            elif key == ord("-"):
+                gain = max(4, gain - 8);     stub.send(f"g{gain}")
+                print(f"gain {gain}/16")
+            elif key == ord("="):
+                gain = min(248, gain + 8);   stub.send(f"g{gain}")
+                print(f"gain {gain}/16")
+            elif key in (ord(","), ord(".")):
+                # 노출을 건드리면 보드가 배경을 새로 잡는다(화면 전체가 움직이므로).
+                # 그러면 지금 기준도 같이 무효다 — 1단계를 다시 해야 한다.
+                exposure = (max(0, exposure - 50) if key == ord(",")
+                            else min(1200, exposure + 50))
+                stub.send(f"e{exposure}")
+                print(f"exposure {exposure} — 보드 배경이 리셋됩니다. n 으로 1단계부터.")
+            elif key == ord("x"):
+                auto_exp = not auto_exp; stub.send(f"x{1 if auto_exp else 0}")
+                print(f"auto exposure {'on' if auto_exp else 'off'} — n 으로 1단계부터.")
+            elif key == ord("/"):
+                stub.send("?")
+            elif key == ord("p"):
+                preview = not preview
+                stub.send(f"p{4 if preview else 0}")   # 4프레임당 1장
+                if not preview:
+                    try:
+                        cv2.destroyWindow("camera")
+                    except cv2.error:
+                        pass
     finally:
         stub.release()
         cv2.destroyAllWindows()

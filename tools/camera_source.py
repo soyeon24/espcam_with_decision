@@ -93,7 +93,12 @@ class CameraZoneSource:
         self._bg: np.ndarray | None = None
         self._settle = SETTLE_FRAMES
         self._n = 0
-        self.coverage: np.ndarray | None = None   # for display only
+        # Display only, and named as esp_source names them so the viewer needs
+        # no branch. There is no board here, so two of them stay empty.
+        self.coverage: np.ndarray | None = None
+        self.mask: np.ndarray | None = None
+        self.skeleton: np.ndarray | None = None
+        self.preview: np.ndarray | None = None
         self.stale = False
 
     def opened(self) -> bool:
@@ -148,6 +153,7 @@ class CameraZoneSource:
         if self.largest and mask.any():
             mask = largest_blob(mask)
         self.coverage = coverage
+        self.mask = mask * 255
         return mask_to_zone(mask)
 
     def send(self, line: str) -> None:

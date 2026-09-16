@@ -375,11 +375,21 @@ again during the countdown skips it, for when the desk is already empty.
 |---|---|
 | SPACE | next step (during the countdown: capture now) |
 | `n` / `b` | redo background / redo posture baseline |
-| `v` | coverage field ↔ the zone distances the judgement uses |
-| `a` | stretch the coverage panel to its own range |
-| `c` `g` | palette / grid |
 | `1`–`4`, `0` | tag the log with a ground-truth label, stop tagging |
-| `p` | save a PNG |
+| `v` | cycle the left panel: coverage / zone / mask / skeleton |
+| `c` `a` `g` | palette / contrast stretch / grid |
+| `s` / `p` | save a PNG / the camera photo window |
+| `[` `]` | threshold, 0 means Otsu picks it |
+| `o` `O` | opening iterations |
+| `h` / `i` | fill holes / invert |
+| `-` `=` | difference gain |
+| `,` `.` | exposure — the board rebuilds its background, so redo step 1 |
+| `x` | auto exposure and gain |
+| `/` | status from both boards |
+
+This is the only tool that judges. [tools/viewer.py](tools/viewer.py) stays as
+the tuning view - it draws mask and skeleton as they come off the wire and
+does no judgement at all, which is what its four plain panels are for.
 
 The left panel draws the **coverage field**, not the reconstructed distances:
 coverage is what the board actually streams and it carries a gradient, while

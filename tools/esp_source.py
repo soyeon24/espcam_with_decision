@@ -182,7 +182,12 @@ class EspZoneSource:
         self._link.start()
         self._stale_s = stale_s
         self._blank = np.zeros((ZONE_ROWS, ZONE_COLS), np.uint8)
-        self.coverage: np.ndarray | None = None   # 화면 표시용, 판정에는 안 쓴다
+        # 아래 넷은 전부 화면 표시용이다. 판정에 들어가는 것은 read() 가 돌려주는
+        # ZoneFrame 뿐이고, 그건 mask 에서만 나온다.
+        self.coverage: np.ndarray | None = None
+        self.mask: np.ndarray | None = None
+        self.skeleton: np.ndarray | None = None
+        self.preview: np.ndarray | None = None
         self.stale = True
 
     def read(self) -> ZoneFrame | None:
@@ -191,6 +196,9 @@ class EspZoneSource:
         frames, stamps = self._link.snapshot()
         mask = frames.get(TYPE_MASK)
         self.coverage = frames.get(TYPE_COVERAGE)
+        self.mask = mask
+        self.skeleton = frames.get(TYPE_SKELETON)
+        self.preview = frames.get(TYPE_PREVIEW)
         self.stale = mask is None or time.monotonic() - stamps.get(TYPE_MASK, 0.0) > self._stale_s
         return mask_to_zone(self._blank if mask is None else mask)
 
