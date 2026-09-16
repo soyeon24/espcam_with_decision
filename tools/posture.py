@@ -50,6 +50,11 @@ SLUMP_HOLD_S = 3.0
 SLUMP_ARM_AT = 0.25
 RECLINE_SPAN_MM = 150.0  # 이만큼 멀어지면 젖힘 최대 (실측: 젖힘 +173mm, 엎드림 -105mm)
 DIST_DEADBAND_MM = 40.0  # 거리 노이즈. 이 안이면 방향을 정하지 않는다
+# 거리는 엎드림과 젖힘을 가르는 **유일한** 축이라 노이즈에 가장 약하다. 실센서가
+# 아닌 경로에서는 겉보기 크기에서 역산하는데, 그 크기가 마스크 면적을 타고 프레임마다
+# 출렁인다. 순간값으로 판정하면 두 자세가 섞이므로 이 창의 중앙값을 쓴다.
+# 평균이 아니라 중앙값인 이유는 마스크가 한두 프레임씩 크게 튀기 때문이다.
+DIST_SMOOTH_S = 1.2
 BASELINE_CLIP_AT = 0.02  # baseline top_row 가 이보다 작으면 머리가 화각에 잘린 것
 NOD_WINDOW_S = 30.0      # 꾸벅임 집계 창. FSM tick(30s)과 맞춰 둔다
 # 꾸벅임 진폭은 절대값이 아니라 **본인 baseline 세로 크기에 대한 비율**이다.
@@ -303,12 +308,17 @@ class PostureBaseline:
 
 
 def judge(feats: PostureFeatures, base: PostureBaseline | None, nod_rate: float,
-          slump_held_s: float = SLUMP_HOLD_S) -> PostureVerdict:
+          slump_held_s: float = SLUMP_HOLD_S,
+          head_mm: float | None = None) -> PostureVerdict:
     """특징 + baseline + 꾸벅임 빈도 -> 자세 라벨과 phi/delta.
 
     slump_held_s 는 머리가 연속으로 내려가 있던 시간. 짧으면 꾸벅임의 하강 국면일
     뿐이라 엎드림 기여도를 비례해서 깎는다.
+
+    head_mm 을 주면 거리 축에만 그 값을 쓴다 (평활한 값). feats 안의 값은 날것으로
+    남겨 로그에 그대로 남는다 — 평활이 과했는지 나중에 되짚을 수 있어야 한다.
     """
+    dist_mm = feats.head_mm if head_mm is None else head_mm
     if feats.occupancy < PRESENT_MIN_OCC:
         return PostureVerdict("ABSENT", False, 0.0, 0.0, feats,
                               nod_rate=nod_rate, note="low occupancy")
@@ -324,8 +334,8 @@ def judge(feats: PostureFeatures, base: PostureBaseline | None, nod_rate: float,
 
     # 2) 젖힘은 '멀어진 거리' 자체가 고유 축이다. 머리 높이에 곱하면 안 된다 —
     #    머리를 안 내리고 젖히는 경우가 0 으로 사라진다.
-    if np.isfinite(feats.head_mm) and np.isfinite(base.head_mm):
-        dist_delta = feats.head_mm - base.head_mm
+    if np.isfinite(dist_mm) and np.isfinite(base.head_mm):
+        dist_delta = dist_mm - base.head_mm
         recline = float(np.clip((dist_delta - DIST_DEADBAND_MM) / RECLINE_SPAN_MM, 0.0, 1.0))
     else:
         dist_delta, recline = 0.0, 0.0
@@ -372,6 +382,7 @@ class PostureTracker:
     _prev: np.ndarray | None = field(default=None, repr=False)
     _posture_buf: list[PostureFeatures] = field(default_factory=list, repr=False)
     _bg_buf: list[np.ndarray] = field(default_factory=list, repr=False)
+    _head_hist: deque = field(default_factory=deque, repr=False)
     _want_posture: int = 0
     _want_bg: int = 0
     _slump_since: float | None = field(default=None, repr=False)
@@ -404,6 +415,17 @@ class PostureTracker:
         scale = self.baseline.spread if self.baseline else feats.spread
         nod_rate = self.nods.update(now, feats.top_row, present, scale)
 
+        # 거리 축만 평활한다. 여기만 부호로 엎드림/젖힘을 가르므로 노이즈에 제일 약하고,
+        # 자리를 비우면 남은 값이 의미를 잃으므로 같이 비운다.
+        if not present:
+            self._head_hist.clear()
+        elif np.isfinite(feats.head_mm):
+            self._head_hist.append((now, feats.head_mm))
+        while self._head_hist and now - self._head_hist[0][0] > DIST_SMOOTH_S:
+            self._head_hist.popleft()
+        head_mm = (float(np.median([v for _, v in self._head_hist]))
+                   if self._head_hist else float("nan"))
+
         if self._want_posture > 0:
             want = self._want_posture
             if feats.occupancy >= PRESENT_MIN_OCC:
@@ -418,7 +440,7 @@ class PostureTracker:
         # 머리가 연속으로 내려가 있던 시간. 직전 프레임의 raw 값으로 재는 한 프레임
         # 지연이 있지만 30fps 에서는 무시할 수 있다.
         held = (now - self._slump_since) if self._slump_since is not None else 0.0
-        verdict = judge(feats, self.baseline, nod_rate, held)
+        verdict = judge(feats, self.baseline, nod_rate, held, head_mm)
 
         if verdict.parts.get("slump_raw", 0.0) >= SLUMP_ARM_AT:
             if self._slump_since is None:
