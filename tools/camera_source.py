@@ -154,8 +154,19 @@ class CameraZoneSource:
         """Accept the board's commands so the viewer needs no special case."""
         if line.startswith("t") and line[1:].isdigit():
             self.threshold = int(line[1:])
-        elif line == "b":
+        elif line.startswith("b"):
+            # 'b8' is 'capture in 8 s' on the board. The viewer runs that
+            # countdown itself so both paths behave the same, and by the time
+            # this arrives the delay is already over.
             self.reset_background()
+
+    def log_lines(self) -> list[str]:
+        """No board, so nothing to report. Present so the viewer needs no branch."""
+        return []
+
+    @property
+    def error(self) -> str | None:
+        return None
 
     def release(self) -> None:
         self.cap.release()

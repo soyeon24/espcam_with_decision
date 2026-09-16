@@ -23,6 +23,7 @@ import struct
 import sys
 import threading
 import time
+from collections import deque
 
 import numpy as np
 
@@ -59,20 +60,25 @@ class _Link(threading.Thread):
         self.lock = threading.Lock()
         self.frames: dict[int, np.ndarray] = {}
         self.stamps: dict[int, float] = {}
+        self.log: deque[str] = deque(maxlen=8)
+        self.error: str | None = None
         self.running = True
 
     def run(self) -> None:
-        import serial
-        while self.running:
-            try:
+        # 예외 종류를 가리지 않는다. 좁게 잡았더니 _text 의 인코딩 오류에 스레드가
+        # 죽고 running 은 True 로 남아, read() 가 마지막 프레임을 영원히 돌려주며
+        # 화면만 멀쩡한 상태가 됐다. 멈출 거면 멈췄다고 말해야 한다.
+        try:
+            while self.running:
                 chunk = self.ser.read(8192)
-            except serial.SerialException as exc:
-                print(f"[serial] {exc}", file=sys.stderr)
-                self.running = False
-                return
-            if chunk:
-                self.buf += chunk
-                self._parse()
+                if chunk:
+                    self.buf += chunk
+                    self._parse()
+        except Exception as exc:
+            self.error = f"{type(exc).__name__}: {exc}"
+            print(f"[serial] {self.error}", file=sys.stderr)
+        finally:
+            self.running = False
 
     def send(self, line: str) -> None:
         try:
@@ -124,10 +130,25 @@ class _Link(threading.Thread):
                     self.frames[typ] = np.frombuffer(payload, np.uint8).reshape(h, w)
                     self.stamps[typ] = time.monotonic()
 
-    @staticmethod
-    def _text(raw: bytes) -> None:
-        sys.stdout.write(raw.decode("utf-8", "replace"))
-        sys.stdout.flush()
+    def _text(self, raw: bytes) -> None:
+        """ESP 로그 텍스트. 프레임이 깨져 바이너리가 이 경로로 새면 U+FFFD 가
+        생기는데, cp949 콘솔은 그걸 인코딩하지 못한다. str 로 쓰지 않고 bytes 를
+        그대로 흘려 그 경로를 아예 없앤다."""
+        out = getattr(sys.stdout, "buffer", None)
+        try:
+            if out is not None:
+                out.write(raw)
+                out.flush()
+            else:
+                sys.stdout.write(raw.decode("utf-8", "replace"))
+                sys.stdout.flush()
+        except Exception:
+            pass    # 로그를 못 찍는 것이 링크를 끊을 이유는 못 된다
+        with self.lock:
+            for line in raw.decode("utf-8", "replace").splitlines():
+                line = line.strip()
+                if line:
+                    self.log.append(line)
 
     def snapshot(self) -> tuple[dict[int, np.ndarray], dict[int, float]]:
         with self.lock:
@@ -154,7 +175,7 @@ def mask_to_zone(mask: np.ndarray) -> ZoneFrame:
 
 
 class EspZoneSource:
-    """tof_stub.CameraToFStub 과 같은 인터페이스."""
+    """camera_source.CameraZoneSource 와 같은 인터페이스."""
 
     def __init__(self, port: str, baud: int = 921600, stale_s: float = 1.0):
         self._link = _Link(port, baud)
@@ -176,6 +197,17 @@ class EspZoneSource:
     def send(self, line: str) -> None:
         """RP2040/ESP 에 명령을 그대로 보낸다 (t<n> 임계, b 배경 재학습 등)."""
         self._link.send(line)
+
+    def log_lines(self) -> list[str]:
+        """ESP 가 보낸 최근 로그 줄. 보드가 지금 뭘 하는지 화면에 띄우는 용도다 —
+        '# bg captured' 가 뜨기 전에 baseline 을 잡으면 전부 헛수고가 된다."""
+        with self._link.lock:
+            return list(self._link.log)
+
+    @property
+    def error(self) -> str | None:
+        """수신 스레드가 멈춘 이유. 살아 있으면 None."""
+        return self._link.error
 
     def release(self) -> None:
         self._link.stop()

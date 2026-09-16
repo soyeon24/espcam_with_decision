@@ -18,6 +18,7 @@ Exits non-zero on the first failure.
 from __future__ import annotations
 
 import binascii
+import collections
 import contextlib
 import io
 import struct
@@ -85,6 +86,7 @@ def hold(tr, t, pose_fn, seconds):
 # -- the wire format ------------------------------------------------------
 link = object.__new__(es._Link)
 link.buf, link.frames, link.stamps, link.lock = bytearray(), {}, {}, threading.Lock()
+link.log = collections.deque(maxlen=8)      # _text 가 남기는 ESP 로그 줄
 payload = bytes((i * 7) % 256 for i in range(W * H))
 good = struct.pack("<BBHHHH", es.TYPE_MASK, 0, W, H, len(payload),
                    binascii.crc_hqx(payload, 0xFFFF))

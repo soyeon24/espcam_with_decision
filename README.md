@@ -359,6 +359,39 @@ uv run tools/posture_viewer.py --source esp --port COM5
 uv run tools/test_posture.py                     # synthetic check, no board
 ```
 
+### Calibration is two layers, in order
+
+Press SPACE and the viewer counts eight seconds for you to get out of shot,
+then tells the *sensor* to rebuild its own background - `b`, which on the ESP32
+also re-runs AEC and locks the exposure it lands on. Only once that reports
+back does it take the zone reference the judgement compares against.
+
+The order is the whole point. The ESP32's background is what turns a picture
+into a coverage field; seed it with you still in the chair and you become part
+of the background, after which nothing downstream can find you. Pressing SPACE
+again during the countdown skips it, for when the desk is already empty.
+
+| | |
+|---|---|
+| SPACE | next step (during the countdown: capture now) |
+| `n` / `b` | redo background / redo posture baseline |
+| `v` | coverage field ↔ the zone distances the judgement uses |
+| `a` | stretch the coverage panel to its own range |
+| `c` `g` | palette / grid |
+| `1`–`4`, `0` | tag the log with a ground-truth label, stop tagging |
+| `p` | save a PNG |
+
+The left panel draws the **coverage field**, not the reconstructed distances:
+coverage is what the board actually streams and it carries a gradient, while
+the distance array is the mask pushed back through an apparent-size estimate
+and so holds two values. `v` switches to it when you want to see exactly what
+the judgement sees.
+
+The panel's link line is there because a dead link looks like a working one -
+the last frame keeps being drawn. It shows the board's own log (`# bg
+captured`, `# exposure locked`) while things are healthy, and says so when the
+mask stops arriving or the reader thread stops.
+
 ### The sensor is the only swappable part
 
 [tools/posture.py](tools/posture.py) takes one thing: a 54x42 array of
