@@ -38,8 +38,10 @@ Keys:
 from __future__ import annotations
 
 import argparse
+import csv
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 
 import cv2
@@ -344,7 +346,10 @@ def main() -> None:
     guard, bg_adapt = 24, True      # 스케치 기본값 (bg_guard, bg_period != 0)
     bg_phase, bg_at, bg_marks = None, 0.0, 0   # None / "clear" / "settle"
     fps, last = 0.0, time.perf_counter()
-    tag, log_rows = None, []
+    # 로그는 프레임마다 바로 디스크에 쓴다. 끝에 한 번에 쓰던 때는 창을 X 로 닫으면
+    # 2분치가 통째로 날아갔다 - 실제로 그렇게 78초를 잃었다.
+    tag, tag_counts, log_n, log_fh, log_w = None, Counter(), 0, None, None
+    last_depth = None
     try:
         while True:
             zone = stub.read()
@@ -389,9 +394,14 @@ def main() -> None:
 
             # 판정 구간은 무조건 기록한다. 키를 눌러야만 남기게 했더니 실제 실행에서
             # 매번 빠졌다. 1~4 로 붙이는 정답 라벨(tag)은 선택 사항으로 둔다.
-            if step == STEP_LIVE:
+            # 센서는 12fps 인데 루프는 150fps 라 같은 프레임이 열 번 넘게 들어온다.
+            # 그대로 남기면 로그가 열세 배로 부풀고 분포도 왜곡된다.
+            fresh = last_depth is None or not np.array_equal(zone.depth_mm, last_depth)
+            last_depth = zone.depth_mm
+
+            if step == STEP_LIVE and fresh:
                 fe = verdict.features
-                log_rows.append({
+                row = {
                     "tag": tag or "", "t": f"{now:.3f}", "label": verdict.label,
                     "occupancy": f"{fe.occupancy:.4f}", "top_row": f"{fe.top_row:.4f}",
                     "spread": f"{fe.spread:.4f}", "head_mm": f"{fe.head_mm:.1f}",
@@ -403,7 +413,17 @@ def main() -> None:
                     "nod_dip": f"{verdict.parts.get('nod_dip', 0.0):.4f}",
                     "nod_amp": f"{verdict.parts.get('nod_amp', 0.0):.4f}",
                     "phi": f"{verdict.phi:.3f}", "delta": f"{verdict.delta:.3f}",
-                })
+                }
+                if log_w is None:
+                    log_fh = open(args.log, "w", newline="", encoding="utf-8")
+                    log_w = csv.DictWriter(log_fh, fieldnames=list(row))
+                    log_w.writeheader()
+                log_w.writerow(row)
+                log_n += 1
+                if tag:
+                    tag_counts[tag] += 1
+                if log_n % 60 == 0:
+                    log_fh.flush()      # 창이 갑자기 닫혀도 여기까지는 남는다
 
             pics = {"coverage": stub.coverage, "mask": stub.mask,
                     "skeleton": stub.skeleton}
@@ -431,7 +451,7 @@ def main() -> None:
                              layers=pics, layer=LAYERS[layer],
                              stretch=stretch, link=link, step_hint=step_hint, warn=warn)
             if tag:
-                _text(canvas, f"REC {tag}  ({len(log_rows)})", (16, 28), 0.6, (70, 70, 245), 2)
+                _text(canvas, f"REC {tag}  ({log_n})", (16, 28), 0.6, (70, 70, 245), 2)
             cv2.imshow("posture from zone map", canvas)
 
             # 렌즈가 가려졌는지 노출이 날아갔는지는 이 창에서만 보인다. 한 장에
@@ -546,13 +566,19 @@ def main() -> None:
     finally:
         stub.release()
         cv2.destroyAllWindows()
-        if log_rows:
-            import csv
-            with open(args.log, "w", newline="", encoding="utf-8") as fh:
-                w = csv.DictWriter(fh, fieldnames=list(log_rows[0]))
-                w.writeheader()
-                w.writerows(log_rows)
-            print(f"{len(log_rows)} 행 기록: {args.log}")
+        if log_fh is not None:
+            log_fh.close()
+            print()
+            print(f"{log_n} 행 기록: {args.log}")
+            if tag_counts:
+                for k, v in tag_counts.items():
+                    print(f"   {k:9s} {v:5d} 행")
+            else:
+                # 조용히 태그 없는 로그를 남기면, 찍은 사람은 성공한 줄 안다.
+                print("   !! 태그가 하나도 안 찍혔습니다. 1~4 키는 영상 창에"
+                      " 포커스가 있어야 먹습니다 (창을 한 번 클릭한 뒤 누르세요).")
+        else:
+            print("기록된 행이 없습니다 - 판정 단계까지 진행하셨나요?")
 
 
 if __name__ == "__main__":
