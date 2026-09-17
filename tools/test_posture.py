@@ -120,7 +120,10 @@ print(f"bad crc dropped  {'ok' if ok else 'FAIL'}\n")
 CASES = [
     ("upright",       lambda s: person(),                          5.0, "UPRIGHT"),
     ("slump",         lambda s: person(head_row=19.0),             5.0, "SLUMP"),
-    ("recline",       lambda s: person(head_row=9.0, scale=0.70),  5.0, "RECLINE"),
+    # scale 0.60 puts the reconstructed distance +77% above the reference, which
+    # is where a recorded recline sits (+53 to +86%). 0.70 only reached +35% and
+    # was asking the judgement to call something the sensor never sees.
+    ("recline",       lambda s: person(head_row=9.0, scale=0.60),  5.0, "RECLINE"),
     ("drowsy",        lambda s: person(head_row=nod(s)),          40.0, "DROWSY"),
     ("absent",        lambda s: np.zeros((H, W), np.uint8),        2.0, "ABSENT"),
     ("hand to side",  lambda s: person(hand="side"),               5.0, "UPRIGHT"),

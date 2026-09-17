@@ -64,9 +64,19 @@ RECLINE_ARM_AT = 0.25    # 지속 타이머를 켜는 문턱. 라벨 문턱에�
 # 라벨 기록 실측 (기준=바른자세 머리폭):
 #   바른자세 1.00~1.08   엎드림 1.15~1.69   젖힘 0.46~0.92
 # 엎드림 하위5%와 젖힘 상위95%가 둘 다 1.08 이라 그 사이가 경계다.
-HEADW_DEADBAND = 0.08     # 바른 자세가 흔들리는 폭. 이 안이면 방향을 정하지 않는다
-HEADW_SHRINK_FULL = 0.12  # 기준보다 이만큼 더 줄면 젖힘 최대
-RECLINE_SPAN_MM = 150.0  # (거리 축은 화면 표시용으로만 남는다)
+# 거리는 절대 mm 가 아니라 **기준 거리에 대한 비율**로 본다. 앉는 거리가 셋업마다
+# 다르므로 mm 문턱은 옮겨 다니지 못한다.
+#
+# 라벨 기록 실측 (기준 대비):
+#   바른자세 -4%~+24%   엎드림 -27%~-13%   젖힘 +53%~+86%   꾸벅임 +4%~+18%
+RECLINE_REL_DEADBAND = 0.25   # 바른 자세와 꾸벅임이 닿는 위쪽 끝
+RECLINE_REL_SPAN = 0.25       # 여기서부터 이만큼 더 멀어지면 젖힘 최대
+
+# 머리 폭은 기록과 화면에만 남는다. 한 셋업에서는 깨끗이 갈렸지만(엎드림이 커지고
+# 젖힘이 작아짐) 카메라를 낮추자 **부호가 뒤집혔다** - 엎드림 쪽이 더 줄었다.
+# 거리 축은 두 셋업 모두에서 부호가 맞았다. 기하에 따라 뒤집히는 축은 쓸 수 없다.
+HEADW_DEADBAND = 0.08
+HEADW_SHRINK_FULL = 0.12
 DIST_DEADBAND_MM = 40.0  # 거리 노이즈. 이 안이면 방향을 정하지 않는다
 # 거리는 엎드림과 젖힘을 가르는 **유일한** 축이라 노이즈에 가장 약하다. 실센서가
 # 아닌 경로에서는 겉보기 크기에서 역산하는데, 그 크기가 마스크 면적을 타고 프레임마다
@@ -399,11 +409,11 @@ def judge(feats: PostureFeatures, base: PostureBaseline | None, nod_rate: float,
     # 섞이면 몸통 폭에서 나온 거리는 부호까지 뒤집힌다.
     dist_delta = (dist_mm - base.head_mm
                   if np.isfinite(dist_mm) and np.isfinite(base.head_mm) else 0.0)
-    if width > 0.0 and base.head_w > 0.0:
-        shrink = 1.0 - width / base.head_w
-        recline_raw = float(np.clip((shrink - HEADW_DEADBAND) / HEADW_SHRINK_FULL, 0.0, 1.0))
+    if np.isfinite(dist_mm) and np.isfinite(base.head_mm) and base.head_mm > 0.0:
+        rel = (dist_mm - base.head_mm) / base.head_mm
+        recline_raw = float(np.clip((rel - RECLINE_REL_DEADBAND) / RECLINE_REL_SPAN, 0.0, 1.0))
     else:
-        recline_raw = 0.0
+        rel, recline_raw = 0.0, 0.0
     # 지속 조건을 못 채운 젖힘은 꾸벅임의 흔들림일 뿐이다.
     recline = recline_raw * float(np.clip(recline_held_s / RECLINE_HOLD_S, 0.0, 1.0))
 
@@ -421,7 +431,9 @@ def judge(feats: PostureFeatures, base: PostureBaseline | None, nod_rate: float,
 
     parts = {"slump": slump, "recline": recline, "drowsy": drowsy,
              "dist_mm": dist_delta, "slump_raw": slump_raw, "recline_raw": recline_raw,
-             "headw_ratio": (width / base.head_w) if base.head_w > 0 else 0.0}
+             "headw_ratio": (width / base.head_w) if base.head_w > 0 else 0.0,
+             "dist_rel": (dist_mm / base.head_mm - 1.0)
+                         if np.isfinite(dist_mm) and base.head_mm > 0 else 0.0}
     # 뒤로 젖힘은 자세 불량이지만 각성 상태일 수 있어 피로 기여를 낮게 잡는다.
     delta = float(np.clip(max(0.95 * slump, 0.85 * drowsy, 0.45 * recline), 0.0, 1.0))
     stability = 1.0 - float(np.clip(feats.motion / MOTION_SPAN, 0.0, 1.0))
@@ -429,14 +441,19 @@ def judge(feats: PostureFeatures, base: PostureBaseline | None, nod_rate: float,
 
     # 젖힘을 먼저 본다. 반대로 두면 slump 가 먼저 문턱을 넘어 젖힘이 영영 안 뜬다
     # (실측에서 recline 1.0 인데도 라벨이 SLUMP 로 나왔던 버그).
-    # 엎드림이 졸음보다 앞이다. slump 가 지속 조건(SLUMP_HOLD_S)을 통과해야만 올라오므로
-    # 꾸벅임의 하강 국면은 여기까지 못 온다 - 순간값과 창값이 섞이던 문제가 여기서 끊긴다.
+    #
+    # 졸음이 엎드림보다 앞이다. 꾸벅이며 조는 사람은 머리가 조금씩 흘러내려 엎드림
+    # 조건도 같이 채운다 - 실측에서 꾸벅임 구간의 머리높이가 0.146 에서 0.293 까지
+    # 흘렀고, 엎드림을 먼저 보니 46% 가 SLUMP 로 갔다. 둘 다 사실이지만 꾸벅임은
+    # 세어서 얻은 적극적인 근거이고 엎드림은 '머리가 내려가 있다'일 뿐이라, 더 많이
+    # 말해주는 쪽을 택한다. 뺏길 걱정도 없다 - 바른자세와 엎드림 구간의 꾸벅임
+    # 빈도는 실측에서 0.0 이었다.
     if recline >= RECLINE_LABEL_AT:
         label = "RECLINE"
-    elif slump >= SLUMP_LABEL_AT:
-        label = "SLUMP"
     elif drowsy >= DROWSY_LABEL_AT:
         label = "DROWSY"
+    elif slump >= SLUMP_LABEL_AT:
+        label = "SLUMP"
     else:
         label = "UPRIGHT"
     note = "baseline clipped - press b" if base.clipped else ""
