@@ -230,7 +230,7 @@ static void send_frame(uint8_t type, uint16_t w, uint16_t h, const uint8_t *data
 // ---------------------------------------------------------------- commands
 
 static void status(void) {
-    Serial.printf("\n# mode=%s bg=%s period=%u gain=%u/16 preview=%u fps_cap=%s\n",
+    Serial.printf("\n# mode=%s bg=%s period=%u guard=%u gain=%u/16 preview=%u fps_cap=%s\n",
                   send_diff ? "diff" : "raw",
                   bg_valid ? "set" : "unset",
                   bg_period, bg_guard, gain_q4, prev_every,

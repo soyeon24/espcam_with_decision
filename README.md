@@ -203,7 +203,7 @@ cmake --build build
 ```
 
 Flash `build/pico_esp32-cam_ftdi.uf2` with BOOT held while plugging in.
-Roughly 27 KB of flash and 11 KB of RAM.
+Roughly 44 KB of flash and 68 KB of RAM - the vision stage's frame buffers are most of the latter, since `in_buf` and `out_buf` are each sized for a whole 160x120 preview.
 
 ## Use
 

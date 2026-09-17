@@ -683,8 +683,8 @@ bool vision_rx_byte(uint8_t b) {
 static void status(void) {
     char line[224];
     snprintf(line, sizeof line,
-             "\n# rp2040: t=%u open=%u fill=%u close=%u skel=%u graph=%u spur=%u"
-             " big=%u cov=%u baud=%lu joints=%u links=%u"
+             "\n# rp2040: t=%u eff=%u inv=%u open=%u fill=%u close=%u skel=%u"
+             " graph=%u spur=%u big=%u cov=%u baud=%lu joints=%u links=%u"
              " frames=%lu crcerr=%lu dropped=%lu\n",
              cfg_threshold, cfg_effective, cfg_invert, cfg_open, cfg_fill, cfg_close, cfg_skeleton,
              cfg_graph, cfg_spur, cfg_largest, cfg_coverage,
