@@ -57,7 +57,11 @@ static uint16_t crc16(const uint8_t *p, uint32_t n) {
 // ---------------------------------------------------------------- tunables
 
 static uint8_t cfg_threshold = 40;
-static uint8_t cfg_open      = 1;   /* erosions then dilations: kills speckle */
+/* 0, matching the board this was tuned on. An opening severs any connection a
+ * single cell wide, and at 54x42 a neck is about that - the head detaches into
+ * its own blob and the largest-component step then throws it away. Turn it back
+ * on with 'o' if the mask is speckled. */
+static uint8_t cfg_open      = 0;
 static uint8_t cfg_close     = 0;   /* dilations then erosions - see fill_holes */
 static bool    cfg_fill      = true;
 static bool    cfg_skeleton  = true;
@@ -115,6 +119,10 @@ static void out_drain(void) {
 }
 
 static void say(const char *s) {
+    /* out_buf 를 거치지 않고 CDC FIFO 에 직접 쓴다. 프레임이 나가는 중이면 그
+     * 한가운데 텍스트가 끼어 호스트 쪽 CRC 가 깨진다 - '?' 한 번에 프레임 하나를
+     * 잃는다. 다 빠져나간 뒤에만 쓴다. */
+    if (out_len) return;
     if (tud_cdc_n_connected(CDC_VISION)) {
         tud_cdc_n_write(CDC_VISION, s, strlen(s));
         tud_cdc_n_write_flush(CDC_VISION);
@@ -745,7 +753,13 @@ void vision_init(void) {
 }
 
 void vision_task(void) {
-    poll_commands();
-    if (!tud_cdc_n_connected(CDC_VISION)) out_reset();
-    else                                  out_drain();
+    if (!tud_cdc_n_connected(CDC_VISION)) {
+        out_reset();
+        poll_commands();        /* ESP 로 넘길 명령은 뷰어가 없어도 받는다 */
+        return;
+    }
+    out_drain();
+    /* status() 가 say() 로 텍스트를 뱉으므로, 프레임이 다 나간 뒤에만 명령을
+     * 처리한다. 그러지 않으면 '?' 가 자기 답과 함께 프레임을 하나 깨뜨린다. */
+    if (out_len == 0) poll_commands();
 }
