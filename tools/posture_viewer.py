@@ -326,9 +326,13 @@ def main() -> None:
     ap.add_argument("--bg-frames", type=int, default=30)
     ap.add_argument("--baseline-frames", type=int, default=60)
     ap.add_argument("--outdir", default="snapshots")
-    ap.add_argument("--log", default="posture_log.csv",
-                    help="1/2/3 으로 자세를 표시하는 동안 특징을 여기 기록한다")
+    # 기본 이름에 시각을 넣는다. 고정 이름이라 다음 기록이 앞 기록을 덮어썼고,
+    # 셋업을 바꿔가며 찍은 것들을 나란히 비교할 수가 없었다.
+    ap.add_argument("--log", default=None,
+                    help="특징을 기록할 CSV (기본: posture_log_<날짜시각>.csv)")
     args = ap.parse_args()
+    if args.log is None:
+        args.log = f"posture_log_{time.strftime('%Y%m%d_%H%M%S')}.csv"
 
     # 센서 의존은 여기서만 들어온다. 둘 다 read() -> ZoneFrame 이라 아래 루프는
     # 어느 쪽인지 알 필요가 없다.
