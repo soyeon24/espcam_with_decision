@@ -1,3 +1,7 @@
 build
 !.vscode/*
 __pycache__/
+
+# 실행 산출물 - 로그와 스냅샷은 저장소에 두지 않는다
+posture_log.csv
+snapshots/
