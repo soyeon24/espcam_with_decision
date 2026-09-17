@@ -28,6 +28,16 @@ import serial.tools.list_ports
 
 from viewer import Link, TYPE_PREVIEW
 
+# Windows 콘솔은 로캘 코드페이지로 인코딩한다(한국어 환경은 cp949). 거기 없는
+# 문자가 하나라도 섞이면 print 가 UnicodeEncodeError 를 던져 프로그램을 통째로
+# 죽인다 - em-dash 하나 때문에 시작하자마자 죽은 적이 있다. 영문 로캘에서는
+# 한글 자체가 그렇게 된다. 글자가 깨지는 편이 죽는 것보다 낫다.
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(errors="replace")
+    except (AttributeError, OSError):
+        pass
+
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
@@ -45,7 +55,7 @@ def main():
     link = Link(args.port, args.baud)
     link.start()
     link.send("p1")                 # every frame; nothing else is being shown
-    print(f"[open] {args.port} — q or ESC to quit\n")
+    print(f"[open] {args.port} - q or ESC to quit\n")
 
     waited = time.monotonic()
     try:
@@ -55,7 +65,7 @@ def main():
 
             if img is None:
                 if time.monotonic() - waited > 4:
-                    print("[wait] no camera frames yet — is this the Vision Stream port?")
+                    print("[wait] no camera frames yet - is this the Vision Stream port?")
                     waited = time.monotonic()
                 if cv2.waitKey(50) & 0xFF in (ord("q"), 27):
                     break

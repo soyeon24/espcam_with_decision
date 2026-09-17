@@ -14,15 +14,15 @@ viewer.py 는 파이프라인을 눈으로 튜닝하는 도구라 mask·skeleton
 오른쪽: 현재 자세 라벨과 FSM 으로 나갈 phi/delta, 그리고 판정 근거가 된 기하 특징.
 
 진행 순서
-  1) 배경 캘리브레이션 — SPACE. 자리를 비울 8초를 센 뒤 센서에 배경 재캡처를
+  1) 배경 캘리브레이션 - SPACE. 자리를 비울 8초를 센 뒤 센서에 배경 재캡처를
      시키고(ESP 는 재노출까지 다시 한다), 그게 끝난 뒤에 zone 기준 거리를 잡는다.
-  2) 자세 baseline    — 바른 자세로 앉아서 SPACE. 이후 판정은 이 기준 대비 상대값이다.
-  3) 판정             — UPRIGHT / SLUMP(엎드림) / RECLINE(젖힘) / DROWSY(졸음) / ABSENT
+  2) 자세 baseline    - 바른 자세로 앉아서 SPACE. 이후 판정은 이 기준 대비 상대값이다.
+  3) 판정             - UPRIGHT / SLUMP(엎드림) / RECLINE(젖힘) / DROWSY(졸음) / ABSENT
 
 판정은 zone 배열만 본다. 센서는 read() -> ZoneFrame 을 내놓기만 하면 되므로,
 웹캠 스텁이든 ESP32-CAM 이든 실 ToF(VL53L9CX)든 이 파일은 그대로다.
 
-화면에 찍는 글자는 전부 ASCII 다 — cv2.putText 는 한글을 그리지 못한다.
+화면에 찍는 글자는 전부 ASCII 다 - cv2.putText 는 한글을 그리지 못한다.
 
 Keys:
   단계   SPACE 다음 단계 (1단계 카운트다운 중 다시 누르면 즉시 캡처)
@@ -37,6 +37,7 @@ Keys:
 from __future__ import annotations
 
 import argparse
+import sys
 import time
 from pathlib import Path
 
@@ -45,6 +46,16 @@ import numpy as np
 
 from posture import ZONE_COLS, ZONE_ROWS, PostureTracker, PostureVerdict
 from palette import PALETTES, sensor_grid
+
+# Windows 콘솔은 로캘 코드페이지로 인코딩한다(한국어 환경은 cp949). 거기 없는
+# 문자가 하나라도 섞이면 print 가 UnicodeEncodeError 를 던져 프로그램을 통째로
+# 죽인다 - em-dash 하나 때문에 시작하자마자 죽은 적이 있다. 영문 로캘에서는
+# 한글 자체가 그렇게 된다. 글자가 깨지는 편이 죽는 것보다 낫다.
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(errors="replace")
+    except (AttributeError, OSError):
+        pass
 
 LABEL_COLOR = {
     "UPRIGHT": (110, 220, 110),
@@ -62,7 +73,7 @@ TAG_KEYS = {ord("1"): "upright", ord("2"): "slump", ord("3"): "recline",
 NEAR_MM, FAR_MM = 450.0, 2600.0
 
 # 왼쪽에 그릴 수 있는 것들. zone 은 항상 있고(판정이 쓰는 배열이다), 나머지는
-# 센서가 보내줄 때만 있다 — 웹캠 스텁에는 skeleton 이 없다.
+# 센서가 보내줄 때만 있다 - 웹캠 스텁에는 skeleton 이 없다.
 LAYERS = ("coverage", "zone", "mask", "skeleton")
 
 STEP_BACKGROUND, STEP_BASELINE, STEP_LIVE = range(3)
@@ -101,7 +112,7 @@ def render_coverage(cov: np.ndarray, palette: int, cell: int, grid: bool,
     이건 거리가 아니라 '이 칸이 배경과 얼마나 다른가'다. 그래서 zone 거리 배열과
     달리 NEAR/FAR 매핑을 쓰지 않는다.
 
-    차이값은 범위의 아래쪽에 몰려 있다 — 255 중 50이면 이미 강한 값이다. 그대로
+    차이값은 범위의 아래쪽에 몰려 있다 - 255 중 50이면 이미 강한 값이다. 그대로
     그리면 거의 검은 사각형에 점 몇 개가 되어 구조가 안 보이므로 기본으로 자기
     min..max 를 0..255 로 편다. 판정에 들어가는 값은 건드리지 않는다, 화면만 편다.
     """
@@ -302,7 +313,7 @@ def main() -> None:
         stub = CameraZoneSource(camera=args.camera)
     tracker = PostureTracker()
     step = STEP_BACKGROUND
-    print("STEP 1 — 창에서 SPACE 를 누르고 화면 밖으로 나가세요.")
+    print("STEP 1 - 창에서 SPACE 를 누르고 화면 밖으로 나가세요.")
 
     outdir = Path(args.outdir)
     palette, grid = 0, False
@@ -347,7 +358,7 @@ def main() -> None:
             # 수집이 끝나면 다음 단계로 넘어간다.
             if step == STEP_BACKGROUND and tracker.background.captured:
                 step = STEP_BASELINE
-                print("STEP 2 — 바른 자세로 앉아서 SPACE 를 누르세요.")
+                print("STEP 2 - 바른 자세로 앉아서 SPACE 를 누르세요.")
             elif step == STEP_BASELINE and tracker.baseline is not None:
                 step = STEP_LIVE
                 print("판정 시작. 엎드리거나 뒤로 젖혀 보세요.")
@@ -418,11 +429,11 @@ def main() -> None:
                 step = STEP_BACKGROUND
                 tracker.background.captured = False
                 bg_phase = None
-                print("STEP 1 다시 — SPACE 를 누르고 화면 밖으로 나가세요.")
+                print("STEP 1 다시 - SPACE 를 누르고 화면 밖으로 나가세요.")
             elif key == ord("b"):
                 step = STEP_BASELINE
                 tracker.baseline = None
-                print("STEP 2 다시 — 바른 자세로 앉아서 SPACE.")
+                print("STEP 2 다시 - 바른 자세로 앉아서 SPACE.")
             elif key in TAG_KEYS:
                 tag = TAG_KEYS[key]
                 print(f"기록 시작: {tag} (0 누르면 정지)")
@@ -471,14 +482,14 @@ def main() -> None:
                 print(f"gain {gain}/16")
             elif key in (ord(","), ord(".")):
                 # 노출을 건드리면 보드가 배경을 새로 잡는다(화면 전체가 움직이므로).
-                # 그러면 지금 기준도 같이 무효다 — 1단계를 다시 해야 한다.
+                # 그러면 지금 기준도 같이 무효다 - 1단계를 다시 해야 한다.
                 exposure = (max(0, exposure - 50) if key == ord(",")
                             else min(1200, exposure + 50))
                 stub.send(f"e{exposure}")
-                print(f"exposure {exposure} — 보드 배경이 리셋됩니다. n 으로 1단계부터.")
+                print(f"exposure {exposure} - 보드 배경이 리셋됩니다. n 으로 1단계부터.")
             elif key == ord("x"):
                 auto_exp = not auto_exp; stub.send(f"x{1 if auto_exp else 0}")
-                print(f"auto exposure {'on' if auto_exp else 'off'} — n 으로 1단계부터.")
+                print(f"auto exposure {'on' if auto_exp else 'off'} - n 으로 1단계부터.")
             elif key == ord("/"):
                 stub.send("?")
             elif key == ord("p"):

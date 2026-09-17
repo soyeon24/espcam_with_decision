@@ -35,6 +35,16 @@ import numpy as np
 import serial
 import serial.tools.list_ports
 
+# Windows 콘솔은 로캘 코드페이지로 인코딩한다(한국어 환경은 cp949). 거기 없는
+# 문자가 하나라도 섞이면 print 가 UnicodeEncodeError 를 던져 프로그램을 통째로
+# 죽인다 - em-dash 하나 때문에 시작하자마자 죽은 적이 있다. 영문 로캘에서는
+# 한글 자체가 그렇게 된다. 글자가 깨지는 편이 죽는 것보다 낫다.
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(errors="replace")
+    except (AttributeError, OSError):
+        pass
+
 MAGIC = b"\xA5\x5A"
 HDR_LEN = 12
 MAX_PAYLOAD = 64 * 1024

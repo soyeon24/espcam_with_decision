@@ -1,6 +1,6 @@
 """ESP32-CAM(+RP2040 브리지)을 zone 소스로 쓰는 어댑터.
 
-`tof_stub.py` 와 같은 자리다 — `read()` 가 `ZoneFrame` 을 내놓기만 하면
+`tof_stub.py` 와 같은 자리다 - `read()` 가 `ZoneFrame` 을 내놓기만 하면
 `posture.py` 와 `posture_viewer.py` 는 손대지 않는다. 센서만 갈아끼우는 구조라
 웹캠 스텁 / ESP32-CAM / 실 ToF 가 전부 같은 경계를 쓴다.
 
@@ -9,7 +9,7 @@
     (나중) VL53L9CX 드라이버  실제 거리
 
 **ESP 는 거리를 안 준다.** 밝기 차분을 54x42 로 줄인 coverage 와, 그걸 이진화·
-정제한 mask 만 온다. 그래서 거리는 **겉보기 크기**로 추정한다 — 멀어지면 작게
+정제한 mask 만 온다. 그래서 거리는 **겉보기 크기**로 추정한다 - 멀어지면 작게
 찍히는 원근을 쓰는 것이고, 웹캠 스텁이 어깨 너비로 하던 것과 같은 원리다.
 몸통 폭을 쓰는 이유도 같다: 엎드려도 어깨 너비는 거의 안 변하고 거리만 움직인다.
 
@@ -207,7 +207,7 @@ class EspZoneSource:
         self._link.send(line)
 
     def log_lines(self) -> list[str]:
-        """ESP 가 보낸 최근 로그 줄. 보드가 지금 뭘 하는지 화면에 띄우는 용도다 —
+        """ESP 가 보낸 최근 로그 줄. 보드가 지금 뭘 하는지 화면에 띄우는 용도다 -
         '# bg captured' 가 뜨기 전에 baseline 을 잡으면 전부 헛수고가 된다."""
         with self._link.lock:
             return list(self._link.log)

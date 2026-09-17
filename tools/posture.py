@@ -5,19 +5,19 @@
 RGB·텍스처·얼굴 같은 카메라 고유 정보는 여기 들어오지 않는다.
 
 판정하는 자세 (UPRIGHT 기준 대비):
-  ABSENT   자리비움    — 점유 zone 이 거의 없다. FSM 의 present 로 나간다
-  SLUMP    엎드림      — 이탈하면서 센서에 가까워진다
-  RECLINE  뒤로 젖힘   — 이탈하면서 센서에서 멀어진다
-  DROWSY   졸음        — 머리가 내려갔다 올라오기를 반복한다(꾸벅꾸벅)
+  ABSENT   자리비움    - 점유 zone 이 거의 없다. FSM 의 present 로 나간다
+  SLUMP    엎드림      - 이탈하면서 센서에 가까워진다
+  RECLINE  뒤로 젖힘   - 이탈하면서 센서에서 멀어진다
+  DROWSY   졸음        - 머리가 내려갔다 올라오기를 반복한다(꾸벅꾸벅)
 
-엎드림과 졸음은 둘 다 머리가 내려가지만 **시간 패턴**이 다르다 — 엎드림은 내려가서
+엎드림과 졸음은 둘 다 머리가 내려가지만 **시간 패턴**이 다르다 - 엎드림은 내려가서
 머무는 것, 졸음은 오르내림이 반복되는 것. 그래서 꾸벅임 횟수로 가른다. 꾸벅임 진폭은
 사람마다·거리마다 달라서 본인 baseline 크기에 대한 비율로 잡는다.
 
 **엎드림과 젖힘은 머리 높이로 구분할 수 없다.** 2D 투영에서는 둘 다 머리가 화면
 아래로 내려간다(실측: 바른자세 head_row 0.098 -> 엎드림 0.341, 젖힘도 내려감).
 그래서 머리 높이·몸 접힘은 '얼마나 이탈했나'(크기)만 정하고, '어느 쪽 이탈인가'는
-거리 변화의 **부호**로 가른다 — 엎드리면 가까워지고(428->323mm) 젖히면 멀어진다.
+거리 변화의 **부호**로 가른다 - 엎드리면 가까워지고(428->323mm) 젖히면 멀어진다.
 
 사람 zone 은 절대 거리가 아니라 **배경 대비 침입량**으로 고른다. 실센서는 책상 상판과
 벽을 항상 같이 보기 때문에, 절대 임계(예: 1.2m 이내)로 자르면 책상이 늘 사람으로 잡힌다.
@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-# docs/agent-briefing.md C1 — ToF 는 VL53L9CX (54x42 zone).
+# docs/agent-briefing.md C1 - ToF 는 VL53L9CX (54x42 zone).
 ZONE_COLS, ZONE_ROWS = 54, 42
 
 MAX_RANGE_MM = 4000.0    # 이보다 먼 값은 무효로 본다
@@ -51,7 +51,7 @@ SLUMP_ARM_AT = 0.25
 # 젖힘도 '젖혀서 머무는' 것이다. 꾸벅임은 상체 전체가 잠깐 흔들려 거리 축에 스파이크를
 # 남기는데, 라벨 우선순위에서 젖힘이 맨 앞이라 그 순간 DROWSY 가 통째로 가려졌다.
 # 엎드림에 SLUMP_HOLD_S 를 둔 것과 같은 이유이고, 그때 젖힘에는 빠져 있었다.
-# 값은 NOD_MAX_DOWN_S 에 맞춘다 — 꾸벅임으로 세어 주는 가장 긴 하강보다 오래
+# 값은 NOD_MAX_DOWN_S 에 맞춘다 - 꾸벅임으로 세어 주는 가장 긴 하강보다 오래
 # 유지돼야 비로소 자세로 본다.
 RECLINE_HOLD_S = 2.5
 RECLINE_ARM_AT = 0.25    # 지속 타이머를 켜는 문턱. 라벨 문턱에서 켜면 등급성이 죽는다
@@ -74,7 +74,7 @@ NOD_MIN_DOWN_S = 0.30    # 내려가 있던 시간이 이보다 짧으면 노이
 NOD_MAX_DOWN_S = 2.5
 NOD_REFRACTORY_S = 0.8   # 직전 꾸벅임 이후 최소 간격
 NOD_RATE_FULL = 12.0     # 분당 이 횟수면 졸음 기여도 최대 (라벨은 그 절반인 6회/분)
-# 관측 시간이 짧을 때 그 시간으로 나누면 빈도가 커진다 — 꾸벅임 1회를 2초로
+# 관측 시간이 짧을 때 그 시간으로 나누면 빈도가 커진다 - 꾸벅임 1회를 2초로
 # 나누면 30회/분. 분모에 하한을 둬서 단발 숙임이 졸음으로 읽히지 않게 한다.
 NOD_MIN_SPAN_S = 12.0
 # 졸음은 '지금' 상태다. 꾸벅임을 멈췄는데 이벤트가 30초 창에서 빠지길 기다리면
@@ -84,7 +84,7 @@ NOD_QUIET_S = 8.0        # 이만큼 조용하면 감쇠 시작
 NOD_FADE_S = 6.0         # 이 시간에 걸쳐 0 으로 (총 14초면 완전히 깨어난 것으로 본다)
 MOTION_SPAN = 0.06       # 움직임 정규화 기준
 
-# 머리 찾기 — '맨 위 점유 행'을 머리로 쓰면 손을 든 순간 그 손이 머리가 된다.
+# 머리 찾기 - '맨 위 점유 행'을 머리로 쓰면 손을 든 순간 그 손이 머리가 된다.
 # 머리는 폭이 넓고(팔뚝은 1~2 zone) 몸통 중심축 위에 있다는 두 조건으로 가른다.
 HEAD_MIN_WIDTH = 4       # 머리로 인정할 최소 가로 zone 수
 HEAD_BAND_ROWS = 4       # 머리 거리 산출에 쓸 행 수
@@ -110,7 +110,7 @@ class BackgroundModel:
     """zone 별 정적 배경 거리(책상 상판·벽).
 
     책상을 비우고 capture() 하는 것이 정확하다. 못 했을 때를 위해 zone 별
-    '천천히 감쇠하는 최댓값'으로 자동 학습한다 — 사람은 zone 을 가깝게만 만든다는
+    '천천히 감쇠하는 최댓값'으로 자동 학습한다 - 사람은 zone 을 가깝게만 만든다는
     성질을 쓰지만, 오래 완전히 정지해 있으면 사람이 배경으로 흡수된다.
     """
     ref_mm: np.ndarray | None = None
@@ -139,7 +139,7 @@ class BackgroundModel:
 @dataclass
 class PostureFeatures:
     occupancy: float      # 점유 zone 비율 [0,1]
-    top_row: float        # 최상단 점유 행 (0=위, 1=아래) — 머리 높이
+    top_row: float        # 최상단 점유 행 (0=위, 1=아래) - 머리 높이
     centroid_row: float   # 점유 무게중심 행
     spread: float         # 세로 점유 범위
     head_mm: float        # 머리 zone 거리 중앙값 (mm)
@@ -210,7 +210,7 @@ def extract(frame: ZoneFrame, background: BackgroundModel,
         end = min(top + HEAD_BAND_ROWS, rows)
         mask = occ[top:end, lo:hi]
         vals = depth[top:end, lo:hi][mask]
-        # 평균이 아니라 중앙값 — 머리 바로 위로 손을 들면 팔뚝이 소수 픽셀로 섞이는데,
+        # 평균이 아니라 중앙값 - 머리 바로 위로 손을 들면 팔뚝이 소수 픽셀로 섞이는데,
         # 평균은 그걸 따라가고(실측 -69mm) 중앙값은 버린다.
         head_mm = float(np.median(vals)) if vals.size else float("nan")
     else:
@@ -230,7 +230,7 @@ class NodDetector:
     이 특징 계층에서 끝내고 delta 에 실어 보내야 한다.
 
     기준선은 창의 중앙값이라 자세가 통째로 바뀌어도 따라간다. 그래서 엎드려서
-    머물면(중앙값이 같이 내려감) 꾸벅임으로 세지 않는다 — 엎드림과 졸음이 갈리는 지점.
+    머물면(중앙값이 같이 내려감) 꾸벅임으로 세지 않는다 - 엎드림과 졸음이 갈리는 지점.
     """
     window_s: float = NOD_WINDOW_S
     amplitude: float = NOD_AMPLITUDE_MIN   # update() 에서 baseline 크기에 맞춰 갱신
@@ -285,7 +285,7 @@ class NodDetector:
         span = max(now - self._hist[0][0], 1.0) if self._hist else self.window_s
         rate = len(self._events) * 60.0 / max(min(span, self.window_s), NOD_MIN_SPAN_S)
 
-        # 조용해지면 창에서 빠지길 기다리지 않고 내린다 — 깨어난 것을 바로 반영한다.
+        # 조용해지면 창에서 빠지길 기다리지 않고 내린다 - 깨어난 것을 바로 반영한다.
         quiet = now - self._last_event
         fade = float(np.clip(1.0 - (quiet - NOD_QUIET_S) / NOD_FADE_S, 0.0, 1.0))
         return rate * fade
@@ -324,7 +324,7 @@ def judge(feats: PostureFeatures, base: PostureBaseline | None, nod_rate: float,
     뿐이라 엎드림 기여도를 비례해서 깎는다.
 
     head_mm 을 주면 거리 축에만 그 값을 쓴다 (평활한 값). feats 안의 값은 날것으로
-    남겨 로그에 그대로 남는다 — 평활이 과했는지 나중에 되짚을 수 있어야 한다.
+    남겨 로그에 그대로 남는다 - 평활이 과했는지 나중에 되짚을 수 있어야 한다.
     """
     dist_mm = feats.head_mm if head_mm is None else head_mm
     if feats.occupancy < PRESENT_MIN_OCC:
@@ -334,13 +334,13 @@ def judge(feats: PostureFeatures, base: PostureBaseline | None, nod_rate: float,
         return PostureVerdict("UNKNOWN", True, 0.0, 0.0, feats,
                               nod_rate=nod_rate, note="no baseline")
 
-    # 1) 이탈 '크기' — 머리가 내려간 정도 + 몸이 접힌 정도. 방향 정보는 없다.
+    # 1) 이탈 '크기' - 머리가 내려간 정도 + 몸이 접힌 정도. 방향 정보는 없다.
     head_drop = feats.top_row - base.top_row
     drop = float(np.clip(head_drop / SLUMP_SPAN, 0.0, 1.0))
     collapse = float(np.clip((base.spread - feats.spread) / max(base.spread, 1e-6), 0.0, 1.0))
     magnitude = float(np.clip(0.8 * drop + 0.2 * collapse, 0.0, 1.0))
 
-    # 2) 젖힘은 '멀어진 거리' 자체가 고유 축이다. 머리 높이에 곱하면 안 된다 —
+    # 2) 젖힘은 '멀어진 거리' 자체가 고유 축이다. 머리 높이에 곱하면 안 된다 -
     #    머리를 안 내리고 젖히는 경우가 0 으로 사라진다.
     if np.isfinite(dist_mm) and np.isfinite(base.head_mm):
         dist_delta = dist_mm - base.head_mm
@@ -352,14 +352,14 @@ def judge(feats: PostureFeatures, base: PostureBaseline | None, nod_rate: float,
 
     # 3) 엎드림은 머리 높이로 재되, 멀어지고 있으면 눌러 끈다. 2D 에선 젖혀도 머리가
     #    내려가므로, 이 게이트가 없으면 젖힘이 전부 엎드림으로 빨려 들어간다.
-    #    게이트에는 순간값을 쓴다 — '어느 쪽으로 가고 있나'는 지금 정보이고, 여기에
+    #    게이트에는 순간값을 쓴다 - '어느 쪽으로 가고 있나'는 지금 정보이고, 여기에
     #    지속 조건까지 걸면 젖히는 3초 동안 엎드림이 먼저 문턱을 넘는다.
     slump_raw = magnitude * (1.0 - recline_raw)
-    # 지속 시간이 안 찼으면 아직 엎드림이 아니다 — 꾸벅임의 하강 국면과 구분되는 지점.
+    # 지속 시간이 안 찼으면 아직 엎드림이 아니다 - 꾸벅임의 하강 국면과 구분되는 지점.
     slump = slump_raw * float(np.clip(slump_held_s / SLUMP_HOLD_S, 0.0, 1.0))
 
-    # dist_mm 은 바 없이 숫자로만 보여준다 — 지금 판정의 근거를 눈으로 확인하는 값.
-    # 4) 졸음 — 꾸벅임 빈도. 자세가 아니라 시간 패턴이라 별도 축이다.
+    # dist_mm 은 바 없이 숫자로만 보여준다 - 지금 판정의 근거를 눈으로 확인하는 값.
+    # 4) 졸음 - 꾸벅임 빈도. 자세가 아니라 시간 패턴이라 별도 축이다.
     drowsy = float(np.clip(nod_rate / NOD_RATE_FULL, 0.0, 1.0))
 
     parts = {"slump": slump, "recline": recline, "drowsy": drowsy,
@@ -372,7 +372,7 @@ def judge(feats: PostureFeatures, base: PostureBaseline | None, nod_rate: float,
     # 젖힘을 먼저 본다. 반대로 두면 slump 가 먼저 문턱을 넘어 젖힘이 영영 안 뜬다
     # (실측에서 recline 1.0 인데도 라벨이 SLUMP 로 나왔던 버그).
     # 엎드림이 졸음보다 앞이다. slump 가 지속 조건(SLUMP_HOLD_S)을 통과해야만 올라오므로
-    # 꾸벅임의 하강 국면은 여기까지 못 온다 — 순간값과 창값이 섞이던 문제가 여기서 끊긴다.
+    # 꾸벅임의 하강 국면은 여기까지 못 온다 - 순간값과 창값이 섞이던 문제가 여기서 끊긴다.
     if recline >= RECLINE_LABEL_AT:
         label = "RECLINE"
     elif slump >= SLUMP_LABEL_AT:
