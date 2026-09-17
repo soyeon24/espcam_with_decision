@@ -39,7 +39,10 @@ IMAGE_TYPES = {TYPE_COVERAGE, TYPE_MASK, TYPE_SKELETON, TYPE_PREVIEW, TYPE_RAW}
 # 앉은 사람의 몸통 폭이 화면 폭의 이 비율일 때 이 거리라고 본다.
 REF_SCALE = 0.24
 REF_MM = 700.0
-BACKGROUND_MM = 2400.0    # 사람이 아닌 zone 에 넣을 거리(벽)
+BACKGROUND_MM = 2400.0    # 벽
+DESK_FAR_MM = 1300.0      # 책상 안쪽 (센서에서 먼 쪽)
+DESK_NEAR_MM = 950.0      # 책상 앞쪽
+DESK_TOP = 0.74           # 이 높이(세로 비율)부터 아래가 책상
 MIN_SCALE = 0.02
 
 
@@ -164,10 +167,34 @@ def scale_of(mask: np.ndarray) -> float:
     return float(np.median(wide)) / mask.shape[1]
 
 
+_bg_cache: dict[tuple[int, int], np.ndarray] = {}
+
+
+def synthetic_background(rows: int, cols: int) -> np.ndarray:
+    """책상 + 벽 합성 기하. 모니터 위 센서가 아래를 내려다보는 배치를 가정한다.
+
+    사람이 아닌 zone 에 넣을 값이다. 전부 벽 한 값으로 채우면 화면이 사람/배경
+    두 색으로만 갈려, 무엇을 보고 있는지 읽히지 않는다. 웹캠 경로가 원래 이렇게
+    하고 있었고, 두 경로가 같은 그림을 내야 센서를 갈아끼워도 눈이 헷갈리지 않는다.
+
+    판정에는 영향이 없다 - 배경 캘리브레이션이 이 값을 그대로 기준으로 잡으므로
+    침입량(ref - depth)은 달라지지 않는다.
+    """
+    key = (rows, cols)
+    if key not in _bg_cache:
+        bg = np.full((rows, cols), BACKGROUND_MM, np.float64)
+        top = int(rows * DESK_TOP)
+        for r in range(top, rows):
+            f = (r - top) / max(rows - top - 1, 1)
+            bg[r, :] = DESK_FAR_MM - (DESK_FAR_MM - DESK_NEAR_MM) * f
+        _bg_cache[key] = bg
+    return _bg_cache[key]
+
+
 def mask_to_zone(mask: np.ndarray) -> ZoneFrame:
     """이진 마스크 -> zone 거리 배열. 거리는 겉보기 크기에서 추정한다."""
     person = mask.astype(bool)
-    depth = np.full(person.shape, BACKGROUND_MM, np.float64)
+    depth = synthetic_background(*person.shape).copy()
     scale = scale_of(person)
     if person.any() and scale >= MIN_SCALE:
         depth[person] = float(np.clip(REF_MM * REF_SCALE / scale, 200.0, MAX_RANGE_MM))

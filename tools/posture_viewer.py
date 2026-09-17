@@ -32,6 +32,7 @@ Keys:
          a 대비 스트레치   g 격자   s 스냅샷 저장   p 카메라 사진 창
   보드   [ ] 임계값   o O opening   h 홀 필링   i invert
          - = 차분 게인   , . 노출   x 자동노출   / 상태 출력
+         f 배경 적응 on/off   w W 흡수 가드 (잔상이 남으면 낮춰 볼 것)
   q / ESC  종료
 """
 from __future__ import annotations
@@ -89,6 +90,13 @@ BG_CLEAR_S = 8.0          # 화면 밖으로 나갈 시간
 BG_SETTLE_MIN_S = 1.5     # 'b' 를 보낸 뒤 최소 대기
 BG_SETTLE_MAX_S = 10.0    # 완료 신호가 없어도 이만큼이면 넘어간다
 BG_DONE_MARK = "bg captured"   # ESP 가 끝났다고 알리는 문구
+
+# 배경이 오염되면 화면 전체가 '사람'으로 잡힌다. 책상 앞 사람은 zone 의 절반을
+# 넘기지 않으므로, 이만큼 차 있으면서 움직이지도 않으면 사람이 아니라 배경이 틀린
+# 것이다. 실측: 배경이 깨졌을 때 점유율 64.9%, 시간축 표준편차 0.8.
+# 이 상태에서도 판정은 태연히 UPRIGHT 를 뱉으므로, 화면에 말해주지 않으면 모른다.
+BG_SUSPECT_OCC = 0.55
+BG_SUSPECT_MOTION = 0.010
 
 
 def render_zones(depth_mm: np.ndarray, palette: int, cell: int, grid: bool) -> np.ndarray:
@@ -238,7 +246,7 @@ def render_panel(verdict: PostureVerdict, height: int, *, step: int,
 
 def compose(depth_mm, verdict, *, step=STEP_LIVE, palette=0, cell=14, grid=False,
             bg_ready=False, base_ready=False, fps=0.0, layers=None, layer="coverage",
-            stretch=True, link=None, step_hint=None) -> np.ndarray:
+            stretch=True, link=None, step_hint=None, warn=None) -> np.ndarray:
     # 기본은 coverage 다. 판정이 쓰는 zone 배열은 mask 를 거리로 되돌린 것이라 값이
     # 두 개뿐이고, 팔레트를 씌워도 2색 실루엣밖에 안 나온다.
     img = (layers or {}).get(layer)
@@ -250,6 +258,10 @@ def compose(depth_mm, verdict, *, step=STEP_LIVE, palette=0, cell=14, grid=False
         zones, shown = render_plain(img, cell, grid), layer
     # 어느 레이어를 보고 있는지 항상 적어 둔다. 없어서 화면을 오해하기 쉬웠다.
     _text(zones, shown, (8, 20), 0.45)
+    if warn:
+        # 배경이 깨져도 판정은 태연히 라벨을 내놓는다. 그 조용한 오답이 제일 나쁘다.
+        cv2.rectangle(zones, (0, 28), (zones.shape[1], 56), (0, 0, 120), -1)
+        _text(zones, warn, (8, 48), 0.5, (120, 200, 255), 2)
     height = max(zones.shape[0], PANEL_MIN_H)
     if zones.shape[0] < height:            # zone 맵이 짧으면 위아래로 여백을 준다
         pad = height - zones.shape[0]
@@ -316,11 +328,16 @@ def main() -> None:
     print("STEP 1 - 창에서 SPACE 를 누르고 화면 밖으로 나가세요.")
 
     outdir = Path(args.outdir)
+    # 기본은 웹캠 경로가 내던 그림 그대로다 - zone 거리 배열을 RAINBOW-HC 로.
+    # 센서를 갈아끼워도 같은 그림이 나와야 눈이 헷갈리지 않는다. coverage 는 v 로,
+    # 다른 팔레트는 c 로 언제든 볼 수 있다.
     palette, grid = 0, False
-    layer, stretch = 0, True          # LAYERS 인덱스
+    layer = LAYERS.index("zone")      # 판정이 실제로 쓰는 배열이 기본
+    stretch = True
     # 보드에 보낼 값의 거울. 보드가 실제로 들고 있는 값은 '/' 로 확인한다.
     threshold, opening, fill, invert = 40, 1, True, False
     gain, exposure, auto_exp, preview = 16, 300, False, False
+    guard, bg_adapt = 24, True      # 스케치 기본값 (bg_guard, bg_period != 0)
     bg_phase, bg_at, bg_marks = None, 0.0, 0   # None / "clear" / "settle"
     fps, last = 0.0, time.perf_counter()
     tag, log_rows = None, []
@@ -385,6 +402,13 @@ def main() -> None:
             pics = {"coverage": stub.coverage, "mask": stub.mask,
                     "skeleton": stub.skeleton}
 
+            # 사람이라면 zone 의 절반을 넘게 채우면서 동시에 정지해 있을 수 없다.
+            # 둘 다면 배경이 틀린 것이고, 그건 n 으로만 고쳐진다.
+            fe = verdict.features
+            warn = None
+            if fe.occupancy >= BG_SUSPECT_OCC and fe.motion < BG_SUSPECT_MOTION:
+                warn = f"background stale? {fe.occupancy*100:.0f}% filled, still - press n"
+
             # 링크 상태. 멈춰도 마지막 프레임이 계속 그려지므로 화면만 보고는 모른다.
             if stub.error:
                 link = (False, f"link down: {stub.error}")
@@ -399,7 +423,7 @@ def main() -> None:
                              bg_ready=tracker.background.captured,
                              base_ready=tracker.baseline is not None, fps=fps,
                              layers=pics, layer=LAYERS[layer],
-                             stretch=stretch, link=link, step_hint=step_hint)
+                             stretch=stretch, link=link, step_hint=step_hint, warn=warn)
             if tag:
                 _text(canvas, f"REC {tag}  ({len(log_rows)})", (16, 28), 0.6, (70, 70, 245), 2)
             cv2.imshow("posture from zone map", canvas)
@@ -487,6 +511,19 @@ def main() -> None:
                             else min(1200, exposure + 50))
                 stub.send(f"e{exposure}")
                 print(f"exposure {exposure} - 보드 배경이 리셋됩니다. n 으로 1단계부터.")
+            elif key == ord("f"):
+                # 배경 모델을 얼려 둔다. 조명이 고정된 자리에서는 흘러갈 이유가 없고,
+                # 흘러가는 것이 가만히 있는 사람을 녹이는 원인이다.
+                bg_adapt = not bg_adapt; stub.send(f"a{4 if bg_adapt else 0}")
+                print(f"배경 적응 {'on' if bg_adapt else 'FROZEN'}")
+            elif key in (ord("w"), ord("W")):
+                # 흡수 가드. 이 폭을 넘게 어긋난 칸은 배경에 절대 흡수되지 않는다 —
+                # 가만히 있는 사람을 지키는 장치이지만, 동시에 한 번 틀어진 배경이
+                # 스스로 회복하지 못하는 이유이기도 하다. 그게 잔상이다.
+                guard = max(0, guard - 4) if key == ord("w") else min(255, guard + 4)
+                stub.send(f"s{guard}")
+                print(f"흡수 가드 {guard}" + ("  (0=전부 흡수: 잔상은 사라지지만 "
+                      "가만히 있는 사람도 녹는다)" if guard == 0 else ""))
             elif key == ord("x"):
                 auto_exp = not auto_exp; stub.send(f"x{1 if auto_exp else 0}")
                 print(f"auto exposure {'on' if auto_exp else 'off'} - n 으로 1단계부터.")
