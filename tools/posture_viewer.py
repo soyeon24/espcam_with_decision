@@ -41,7 +41,7 @@ import argparse
 import csv
 import sys
 import time
-from collections import Counter
+from collections import Counter, deque
 from pathlib import Path
 
 import cv2
@@ -99,6 +99,14 @@ BG_DONE_MARK = "bg captured"   # ESP 가 끝났다고 알리는 문구
 # 이 상태에서도 판정은 태연히 UPRIGHT 를 뱉으므로, 화면에 말해주지 않으면 모른다.
 BG_SUSPECT_OCC = 0.55
 BG_SUSPECT_MOTION = 0.010
+
+# 머리가 화면 위쪽으로 잘리면 top_row 가 0 에 붙어 더는 내려갈 자리가 없다. 머리
+# 높이가 이탈의 크기를 재는 축이고 꾸벅임은 그 축의 오르내림이므로, 잘린 상태에서는
+# 둘 다 측정 자체가 불가능하다. 실측: 꾸벅임 구간의 92%가 이 상태였고 DROWSY 가
+# 거의 안 떴다. 조용히 실패하니 화면에서 말해줘야 한다.
+CLIP_AT = 0.02            # top_row 가 이보다 작으면 잘린 것
+CLIP_WINDOW = 40          # 최근 이만큼의 프레임으로 본다
+CLIP_WARN_FRAC = 0.4      # 그중 이 비율이 잘렸으면 경고
 
 
 def render_zones(depth_mm: np.ndarray, palette: int, cell: int, grid: bool) -> np.ndarray:
@@ -346,6 +354,7 @@ def main() -> None:
     gain, exposure, auto_exp, preview = 16, 300, False, False
     guard, bg_adapt = 24, True      # 스케치 기본값 (bg_guard, bg_period != 0)
     bg_phase, bg_at, bg_marks = None, 0.0, 0   # None / "clear" / "settle"
+    clip_hist: deque[bool] = deque(maxlen=CLIP_WINDOW)
     fps, last = 0.0, time.perf_counter()
     # 로그는 프레임마다 바로 디스크에 쓴다. 끝에 한 번에 쓰던 때는 창을 X 로 닫으면
     # 2분치가 통째로 날아갔다 - 실제로 그렇게 78초를 잃었다.
@@ -434,8 +443,15 @@ def main() -> None:
             # 둘 다면 배경이 틀린 것이고, 그건 n 으로만 고쳐진다.
             fe = verdict.features
             warn = None
+            if step == STEP_LIVE:
+                clip_hist.append(fe.top_row <= CLIP_AT)
+            clipped = (len(clip_hist) == CLIP_WINDOW
+                       and sum(clip_hist) / CLIP_WINDOW >= CLIP_WARN_FRAC)
             if fe.occupancy >= BG_SUSPECT_OCC and fe.motion < BG_SUSPECT_MOTION:
                 warn = f"background stale? {fe.occupancy*100:.0f}% filled, still - press n"
+            elif clipped:
+                # 머리 높이가 못 움직이면 엎드림도 꾸벅임도 잴 수 없다.
+                warn = f"head cut off at top ({sum(clip_hist)*100//CLIP_WINDOW}%) - tilt camera up"
 
             # 링크 상태. 멈춰도 마지막 프레임이 계속 그려지므로 화면만 보고는 모른다.
             if stub.error:
