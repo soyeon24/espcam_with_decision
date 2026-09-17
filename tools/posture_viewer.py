@@ -73,6 +73,9 @@ PANEL_W = 340
 PANEL_MIN_H = 705    # 패널 내용이 다 들어가는 최소 높이. 더 짧으면 푸터가 겹친다.
 TAG_KEYS = {ord("1"): "upright", ord("2"): "slump", ord("3"): "recline",
             ord("4"): "drowsy"}
+# 키를 누른 순간부터 기록하면 자세를 바꾸는 동안의 프레임이 라벨에 섞인다. 사람이
+# 바른 자세에서 젖힘으로 즉시 갈 수는 없고, 그 전환 구간은 어느 쪽도 아니다.
+TAG_GRACE_S = 5.0
 NEAR_MM, FAR_MM = 450.0, 2600.0
 
 # 왼쪽에 그릴 수 있는 것들. zone 은 항상 있고(판정이 쓰는 배열이다), 나머지는
@@ -358,7 +361,8 @@ def main() -> None:
     fps, last = 0.0, time.perf_counter()
     # 로그는 프레임마다 바로 디스크에 쓴다. 끝에 한 번에 쓰던 때는 창을 X 로 닫으면
     # 2분치가 통째로 날아갔다 - 실제로 그렇게 78초를 잃었다.
-    tag, tag_counts, log_n, log_fh, log_w = None, Counter(), 0, None, None
+    tag, tag_at = None, 0.0        # tag_at 이 지나야 실제로 기록에 붙는다
+    tag_counts, log_n, log_fh, log_w = Counter(), 0, None, None
     last_depth = None
     try:
         while True:
@@ -411,8 +415,11 @@ def main() -> None:
 
             if step == STEP_LIVE and fresh:
                 fe = verdict.features
+                # 유예 중이면 라벨 없이 기록한다 - 프레임은 남기되 어느 자세로도
+                # 세지 않는다.
+                active = tag if (tag and now >= tag_at) else None
                 row = {
-                    "tag": tag or "", "t": f"{now:.3f}", "label": verdict.label,
+                    "tag": active or "", "t": f"{now:.3f}", "label": verdict.label,
                     "occupancy": f"{fe.occupancy:.4f}", "top_row": f"{fe.top_row:.4f}",
                     "spread": f"{fe.spread:.4f}", "head_mm": f"{fe.head_mm:.1f}",
                     "head_w": f"{fe.head_w:.4f}",
@@ -431,8 +438,8 @@ def main() -> None:
                     log_w.writeheader()
                 log_w.writerow(row)
                 log_n += 1
-                if tag:
-                    tag_counts[tag] += 1
+                if active:
+                    tag_counts[active] += 1
                 if log_n % 60 == 0:
                     log_fh.flush()      # 창이 갑자기 닫혀도 여기까지는 남는다
 
@@ -469,7 +476,11 @@ def main() -> None:
                              layers=pics, layer=LAYERS[layer],
                              stretch=stretch, link=link, step_hint=step_hint, warn=warn)
             if tag:
-                _text(canvas, f"REC {tag}  ({log_n})", (16, 28), 0.6, (70, 70, 245), 2)
+                left = tag_at - now
+                txt = (f"GET READY  {tag}  {left:.0f}s" if left > 0
+                       else f"REC {tag}  ({tag_counts[tag]})")
+                _text(canvas, txt, (16, 28), 0.6,
+                      (60, 210, 245) if left > 0 else (70, 70, 245), 2)
             cv2.imshow("posture from zone map", canvas)
 
             # 렌즈가 가려졌는지 노출이 날아갔는지는 이 창에서만 보인다. 한 장에
@@ -503,8 +514,9 @@ def main() -> None:
                 tracker.baseline = None
                 print("STEP 2 다시 - 바른 자세로 앉아서 SPACE.")
             elif key in TAG_KEYS:
-                tag = TAG_KEYS[key]
-                print(f"기록 시작: {tag} (0 누르면 정지)")
+                tag, tag_at = TAG_KEYS[key], now + TAG_GRACE_S
+                print(f"{TAG_GRACE_S:.0f}초 뒤 '{tag}' 기록 시작 - 자세를 잡으세요"
+                      " (0 누르면 정지)")
             elif key == ord("0"):
                 tag = None
                 print("기록 정지")

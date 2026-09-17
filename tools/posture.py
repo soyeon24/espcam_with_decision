@@ -55,7 +55,18 @@ SLUMP_ARM_AT = 0.25
 # 유지돼야 비로소 자세로 본다.
 RECLINE_HOLD_S = 2.5
 RECLINE_ARM_AT = 0.25    # 지속 타이머를 켜는 문턱. 라벨 문턱에서 켜면 등급성이 죽는다
-RECLINE_SPAN_MM = 150.0  # 이만큼 멀어지면 젖힘 최대 (실측: 젖힘 +173mm, 엎드림 -105mm)
+# 방향은 머리 폭으로 가른다 - 젖히면 멀어져 작아지고, 엎드리면 가까워져 커진다.
+#
+# 원래는 재구성한 거리(dist_mm)를 썼는데, 그 값은 몸통 폭의 중앙값에서 나오고
+# 의자 등받이가 사람과 같이 움직이며 실루엣에 섞이면 부호가 뒤집힌다. 머리는
+# 등받이 위에 있어 오염되지 않는다.
+#
+# 라벨 기록 실측 (기준=바른자세 머리폭):
+#   바른자세 1.00~1.08   엎드림 1.15~1.69   젖힘 0.46~0.92
+# 엎드림 하위5%와 젖힘 상위95%가 둘 다 1.08 이라 그 사이가 경계다.
+HEADW_DEADBAND = 0.08     # 바른 자세가 흔들리는 폭. 이 안이면 방향을 정하지 않는다
+HEADW_SHRINK_FULL = 0.12  # 기준보다 이만큼 더 줄면 젖힘 최대
+RECLINE_SPAN_MM = 150.0  # (거리 축은 화면 표시용으로만 남는다)
 DIST_DEADBAND_MM = 40.0  # 거리 노이즈. 이 안이면 방향을 정하지 않는다
 # 거리는 엎드림과 젖힘을 가르는 **유일한** 축이라 노이즈에 가장 약하다. 실센서가
 # 아닌 경로에서는 겉보기 크기에서 역산하는데, 그 크기가 마스크 면적을 타고 프레임마다
@@ -64,6 +75,13 @@ DIST_DEADBAND_MM = 40.0  # 거리 노이즈. 이 안이면 방향을 정하지 �
 DIST_SMOOTH_S = 1.2
 BASELINE_CLIP_AT = 0.02  # baseline top_row 가 이보다 작으면 머리가 화각에 잘린 것
 NOD_WINDOW_S = 30.0      # 꾸벅임 집계 창. FSM tick(30s)과 맞춰 둔다
+# 기준 머리높이를 재는 창은 집계 창과 분리한다. 하나로 묶었더니 이전 자세를 30초
+# 동안 기억했다 - 젖힘에서 꾸벅임으로 넘어간 실측에서, 머리는 0.244 에 있는데
+# 기준선이 젖힘 때의 0.537 에 머물러 문턱이 0.585 였다. 27초짜리 구간이 통째로
+# 기준선이 따라오기를 기다리다 끝났고 꾸벅임은 한 번도 안 세어졌다.
+# 8초면 꾸벅임 자체는 중앙값을 못 움직이면서(1초 하강이 8초 중 일부) 자세 변화는
+# 금방 따라간다.
+REST_WINDOW_S = 8.0
 # 꾸벅임 진폭은 절대값이 아니라 **본인 baseline 세로 크기에 대한 비율**이다.
 # 사람마다 목 움직임이 다르고, 센서에서 멀어지면 같은 동작도 작게 찍히기 때문.
 # 실측 근거: 42행이 화각을 덮으므로 한 행이 대략 3cm 다. 졸음 꾸벅임은 머리가
@@ -77,10 +95,15 @@ NOD_MIN_DOWN_S = 0.30    # 내려가 있던 시간이 이보다 짧으면 노이
 NOD_MAX_DOWN_S = 2.5
 NOD_REFRACTORY_S = 0.8   # 직전 꾸벅임 이후 최소 간격
 DIP_LOOKBACK_S = 3.0     # 화면에 보여줄 '가장 깊었던 하강'을 찾는 창
-NOD_RATE_FULL = 12.0     # 분당 이 횟수면 졸음 기여도 최대 (라벨은 그 절반인 6회/분)
+# 라벨 기록 실측: 27초에 조건을 만족하는 하강이 4~5회, 다만 몰려서 나왔다. 12 로
+# 두면 라벨(그 절반인 6회/분)에 16% 의 프레임만 닿는다. 8 이면 4회/분에서 붙는데,
+# 분당 네 번 고개가 떨어지는 사람은 졸고 있는 것이 맞다.
+NOD_RATE_FULL = 8.0      # 분당 이 횟수면 졸음 기여도 최대 (라벨은 그 절반인 4회/분)
 # 관측 시간이 짧을 때 그 시간으로 나누면 빈도가 커진다 - 꾸벅임 1회를 2초로
 # 나누면 30회/분. 분모에 하한을 둬서 단발 숙임이 졸음으로 읽히지 않게 한다.
-NOD_MIN_SPAN_S = 12.0
+# 라벨 문턱(4회/분)에 하강 한 번으로 닿으면 안 된다. 18초면 1회는 3.3/분으로
+# 문턱 아래, 2회는 6.7/분으로 위 - 두 번은 떨어져야 꾸벅임으로 본다.
+NOD_MIN_SPAN_S = 18.0
 # 졸음은 '지금' 상태다. 꾸벅임을 멈췄는데 이벤트가 30초 창에서 빠지길 기다리면
 # 깨서 가만히 있어도 DROWSY 가 최대 30초 남는다. 그래서 마지막 꾸벅임 이후
 # 조용하면 창과 무관하게 기여도를 내린다.
@@ -95,6 +118,9 @@ HEAD_BAND_ROWS = 4       # 머리 거리 산출에 쓸 행 수
 TORSO_HALF_SPAN = 0.22   # 몸통 중심에서 이 비율(가로) 안쪽만 머리 후보로 본다
 
 SLUMP_LABEL_AT = 0.70    # 라벨을 SLUMP 로 붙일 기여도
+# 0.55 를 유지한다. 라벨 기록으로 맞출 때 0.40 이 젖힘 재현율을 더 올리는 듯 보였지만,
+# 꾸벅임의 흔들림까지 문턱을 넘어 DROWSY 를 다시 뺏었다(회귀 테스트가 잡았다).
+# 대신 SHRINK_FULL 을 좁혀 같은 83% 를 얻었다 - 문턱이 아니라 기울기로.
 RECLINE_LABEL_AT = 0.55
 DROWSY_LABEL_AT = 0.50
 
@@ -276,7 +302,8 @@ class NodDetector:
             self._events.popleft()
 
         if len(self._hist) >= 8:
-            rest = float(np.median([v for _, v in self._hist]))
+            recent_rest = [v for ts, v in self._hist if now - ts <= REST_WINDOW_S]
+            rest = float(np.median(recent_rest or [v for _, v in self._hist]))
             self.rest = rest
             # 지금 값이 아니라 최근 창에서 가장 깊었던 하강을 보여준다. 고개를 든
             # 뒤에 읽으면 0 이라, 방금 꾸벅임이 문턱에 얼마나 모자랐는지 알 수 없다.
@@ -317,6 +344,7 @@ class PostureBaseline:
     top_row: float
     spread: float
     head_mm: float
+    head_w: float = 0.0
     samples: int = 0
     clipped: bool = False   # 머리가 화각 위쪽에 잘린 채로 측정됐다
 
@@ -326,18 +354,22 @@ class PostureBaseline:
             raise ValueError("baseline 을 만들 특징이 없다")
         med = lambda a: float(np.median([getattr(f, a) for f in feats]))
         heads = [f.head_mm for f in feats if np.isfinite(f.head_mm)]
+        # 머리를 못 찾은 프레임은 head_w 가 0 이다. 기준에 섞으면 통째로 낮아진다.
+        widths = [f.head_w for f in feats if f.head_w > 0]
         top = med("top_row")
         # top_row 가 0 에 붙으면 머리가 잘린 것이다. 그 baseline 을 쓰면 바른 자세도
         # '머리가 내려갔다'로 읽혀 계속 이탈로 나온다(실측: 바른자세 slump 0.37).
         return cls(top, med("spread"),
                    float(np.median(heads)) if heads else float("nan"),
+                   float(np.median(widths)) if widths else 0.0,
                    len(feats), clipped=top < BASELINE_CLIP_AT)
 
 
 def judge(feats: PostureFeatures, base: PostureBaseline | None, nod_rate: float,
           slump_held_s: float = SLUMP_HOLD_S,
           head_mm: float | None = None,
-          recline_held_s: float = RECLINE_HOLD_S) -> PostureVerdict:
+          recline_held_s: float = RECLINE_HOLD_S,
+          head_w: float | None = None) -> PostureVerdict:
     """특징 + baseline + 꾸벅임 빈도 -> 자세 라벨과 phi/delta.
 
     slump_held_s 는 머리가 연속으로 내려가 있던 시간. 짧으면 꾸벅임의 하강 국면일
@@ -347,6 +379,7 @@ def judge(feats: PostureFeatures, base: PostureBaseline | None, nod_rate: float,
     남겨 로그에 그대로 남는다 - 평활이 과했는지 나중에 되짚을 수 있어야 한다.
     """
     dist_mm = feats.head_mm if head_mm is None else head_mm
+    width = feats.head_w if head_w is None else head_w
     if feats.occupancy < PRESENT_MIN_OCC:
         return PostureVerdict("ABSENT", False, 0.0, 0.0, feats,
                               nod_rate=nod_rate, note="low occupancy")
@@ -362,11 +395,15 @@ def judge(feats: PostureFeatures, base: PostureBaseline | None, nod_rate: float,
 
     # 2) 젖힘은 '멀어진 거리' 자체가 고유 축이다. 머리 높이에 곱하면 안 된다 -
     #    머리를 안 내리고 젖히는 경우가 0 으로 사라진다.
-    if np.isfinite(dist_mm) and np.isfinite(base.head_mm):
-        dist_delta = dist_mm - base.head_mm
-        recline_raw = float(np.clip((dist_delta - DIST_DEADBAND_MM) / RECLINE_SPAN_MM, 0.0, 1.0))
+    # 거리는 화면과 로그에만 남긴다. 방향은 머리 폭이 가른다 - 의자가 실루엣에
+    # 섞이면 몸통 폭에서 나온 거리는 부호까지 뒤집힌다.
+    dist_delta = (dist_mm - base.head_mm
+                  if np.isfinite(dist_mm) and np.isfinite(base.head_mm) else 0.0)
+    if width > 0.0 and base.head_w > 0.0:
+        shrink = 1.0 - width / base.head_w
+        recline_raw = float(np.clip((shrink - HEADW_DEADBAND) / HEADW_SHRINK_FULL, 0.0, 1.0))
     else:
-        dist_delta, recline_raw = 0.0, 0.0
+        recline_raw = 0.0
     # 지속 조건을 못 채운 젖힘은 꾸벅임의 흔들림일 뿐이다.
     recline = recline_raw * float(np.clip(recline_held_s / RECLINE_HOLD_S, 0.0, 1.0))
 
@@ -383,7 +420,8 @@ def judge(feats: PostureFeatures, base: PostureBaseline | None, nod_rate: float,
     drowsy = float(np.clip(nod_rate / NOD_RATE_FULL, 0.0, 1.0))
 
     parts = {"slump": slump, "recline": recline, "drowsy": drowsy,
-             "dist_mm": dist_delta, "slump_raw": slump_raw, "recline_raw": recline_raw}
+             "dist_mm": dist_delta, "slump_raw": slump_raw, "recline_raw": recline_raw,
+             "headw_ratio": (width / base.head_w) if base.head_w > 0 else 0.0}
     # 뒤로 젖힘은 자세 불량이지만 각성 상태일 수 있어 피로 기여를 낮게 잡는다.
     delta = float(np.clip(max(0.95 * slump, 0.85 * drowsy, 0.45 * recline), 0.0, 1.0))
     stability = 1.0 - float(np.clip(feats.motion / MOTION_SPAN, 0.0, 1.0))
@@ -415,6 +453,7 @@ class PostureTracker:
     _posture_buf: list[PostureFeatures] = field(default_factory=list, repr=False)
     _bg_buf: list[np.ndarray] = field(default_factory=list, repr=False)
     _head_hist: deque = field(default_factory=deque, repr=False)
+    _width_hist: deque = field(default_factory=deque, repr=False)
     _want_posture: int = 0
     _want_bg: int = 0
     _slump_since: float | None = field(default=None, repr=False)
@@ -452,12 +491,19 @@ class PostureTracker:
         # 자리를 비우면 남은 값이 의미를 잃으므로 같이 비운다.
         if not present:
             self._head_hist.clear()
-        elif np.isfinite(feats.head_mm):
-            self._head_hist.append((now, feats.head_mm))
-        while self._head_hist and now - self._head_hist[0][0] > DIST_SMOOTH_S:
-            self._head_hist.popleft()
+            self._width_hist.clear()
+        else:
+            if np.isfinite(feats.head_mm):
+                self._head_hist.append((now, feats.head_mm))
+            if feats.head_w > 0.0:
+                self._width_hist.append((now, feats.head_w))
+        for h in (self._head_hist, self._width_hist):
+            while h and now - h[0][0] > DIST_SMOOTH_S:
+                h.popleft()
         head_mm = (float(np.median([v for _, v in self._head_hist]))
                    if self._head_hist else float("nan"))
+        head_w = (float(np.median([v for _, v in self._width_hist]))
+                  if self._width_hist else 0.0)
 
         if self._want_posture > 0:
             want = self._want_posture
@@ -474,7 +520,7 @@ class PostureTracker:
         # 지연이 있지만 30fps 에서는 무시할 수 있다.
         held = (now - self._slump_since) if self._slump_since is not None else 0.0
         held_r = (now - self._recline_since) if self._recline_since is not None else 0.0
-        verdict = judge(feats, self.baseline, nod_rate, held, head_mm, held_r)
+        verdict = judge(feats, self.baseline, nod_rate, held, head_mm, held_r, head_w)
 
         if verdict.parts.get("slump_raw", 0.0) >= SLUMP_ARM_AT:
             if self._slump_since is None:

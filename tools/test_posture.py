@@ -37,13 +37,20 @@ Y, X = np.mgrid[0:H, 0:W]
 failed = 0
 
 
-def person(head_row=6.0, scale=1.0, hand=None):
-    """A head and a torso. scale < 1 is the same person further away."""
+def person(head_row=6.0, scale=1.0, hand=None, body=None):
+    """A head and a torso. scale < 1 is the same person further away.
+
+    body scales the torso alone. A nod moves the head without moving the torso
+    much closer or further, so the two have to be separable to model one: the
+    recorded runs show head width holding or growing slightly through nodding
+    while the silhouette below it shifts around.
+    """
     cx = W / 2
+    body = scale if body is None else body
     head_r = 5.0 * scale
     m = ((X - cx) ** 2 / head_r ** 2 + (Y - (head_row + 4 * scale)) ** 2 / head_r ** 2) <= 1.0
-    m |= (((X - cx) ** 2 / (13.0 * scale) ** 2
-           + (Y - (head_row + 20 * scale)) ** 2 / (15.0 * scale) ** 2) <= 1.0)
+    m |= (((X - cx) ** 2 / (13.0 * body) ** 2
+           + (Y - (head_row + 20 * body)) ** 2 / (15.0 * body) ** 2) <= 1.0)
     if hand:
         col = cx if hand == "over" else cx + 16
         m |= (np.abs(X - col) <= 1) & (Y <= head_row + 22)
@@ -134,18 +141,19 @@ for name, pose, seconds, want in CASES:
           f"{p.get('recline', 0):5.2f} {p.get('drowsy', 0):5.2f}"
           f"{'' if ok else '   <-- FAIL'}")
 
-# A real nod takes the whole upper body with it, so apparent size dips while the
-# head is down and the distance axis reads that as leaning away. Recline sits
-# first in the label order, so without a sustain requirement that spike takes the
-# label off somebody falling asleep. Every frame has to be checked, not just the
-# last one - the spike only exists while the head is down.
+# A nod takes the upper body with it, so the silhouette below the head shifts
+# while the head itself stays where it is. Direction is read from head width
+# precisely so that shift cannot be mistaken for leaning away - and recline sits
+# first in the label order, so if it ever were, it would take the label off
+# somebody falling asleep. Every frame has to be checked, not just the last one:
+# the disturbance only exists while the head is down.
 tr, t = calibrated()
 seen, peak = collections.Counter(), 0.0
 for i in range(int(40 * FPS)):
     t += 1 / FPS
     s = i / FPS
     v = tr.update(es.mask_to_zone(
-        person(head_row=nod(s), scale=0.72 if (s % 6.0) < 2.0 else 1.0)), t)
+        person(head_row=nod(s), body=0.72 if (s % 6.0) < 2.0 else 1.0)), t)
     seen[v.label] += 1
     peak = max(peak, v.parts.get("recline", 0.0))
 print()
