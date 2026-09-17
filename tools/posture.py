@@ -148,6 +148,10 @@ class PostureFeatures:
     spread: float         # 세로 점유 범위
     head_mm: float        # 머리 zone 거리 중앙값 (mm)
     motion: float         # 직전 프레임 대비 변화 zone 비율
+    # 머리 밴드에서 가장 넓은 행 / 화면 폭. 겉보기 크기를 재는 축인데, 면적과 달리
+    # 의자에 오염되지 않는다 - 등받이는 머리 아래에 있고, 사람과 같이 움직이며
+    # 면적을 메꿔서 젖힘과 엎드림을 구별할 수 없게 만든다.
+    head_w: float = 0.0
 
 
 @dataclass
@@ -217,13 +221,16 @@ def extract(frame: ZoneFrame, background: BackgroundModel,
         # 평균이 아니라 중앙값 - 머리 바로 위로 손을 들면 팔뚝이 소수 픽셀로 섞이는데,
         # 평균은 그걸 따라가고(실측 -69mm) 중앙값은 버린다.
         head_mm = float(np.median(vals)) if vals.size else float("nan")
+        head_w = float(mask.sum(axis=1).max()) / occ.shape[1] if mask.size else 0.0
     else:
         top_row = centroid_row = spread = 1.0
         head_mm = float("nan")
+        head_w = 0.0
 
     motion = 0.0 if prev is None or prev.shape != occ.shape else \
         float(np.logical_xor(occ, prev).sum()) / total
-    return PostureFeatures(occupancy, top_row, centroid_row, spread, head_mm, motion), occ
+    return (PostureFeatures(occupancy, top_row, centroid_row, spread, head_mm,
+                            motion, head_w), occ)
 
 
 @dataclass
