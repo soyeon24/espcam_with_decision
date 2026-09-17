@@ -224,7 +224,11 @@ def render_panel(verdict: PostureVerdict, height: int, *, step: int,
                      ("head dist", head),
                      ("dist vs base", dist_txt),
                      ("motion", f"{f.motion * 100:.1f} %"),
-                     ("nod / min", f"{verdict.nod_rate:.1f}")):
+                     ("nod / min", f"{verdict.nod_rate:.1f}"),
+                     # 꾸벅임이 문턱에 얼마나 모자랐는지. 왼쪽이 이번 하강 깊이,
+                     # 오른쪽이 인정에 필요한 깊이다.
+                     ("nod dip/need", f"{verdict.parts.get('nod_dip', 0.0):.3f} / "
+                                      f"{verdict.parts.get('nod_amp', 0.0):.3f}")):
         y += 21
         _text(p, key, (16, y), 0.43, (175, 175, 180))
         _text(p, val, (PANEL_W - 122, y), 0.43)
@@ -396,6 +400,8 @@ def main() -> None:
                     "recline": f"{verdict.parts.get('recline', 0.0):.3f}",
                     "drowsy": f"{verdict.parts.get('drowsy', 0.0):.3f}",
                     "nod_rate": f"{verdict.nod_rate:.2f}",
+                    "nod_dip": f"{verdict.parts.get('nod_dip', 0.0):.4f}",
+                    "nod_amp": f"{verdict.parts.get('nod_amp', 0.0):.4f}",
                     "phi": f"{verdict.phi:.3f}", "delta": f"{verdict.delta:.3f}",
                 })
 

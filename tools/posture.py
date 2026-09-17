@@ -66,13 +66,17 @@ BASELINE_CLIP_AT = 0.02  # baseline top_row 가 이보다 작으면 머리가 �
 NOD_WINDOW_S = 30.0      # 꾸벅임 집계 창. FSM tick(30s)과 맞춰 둔다
 # 꾸벅임 진폭은 절대값이 아니라 **본인 baseline 세로 크기에 대한 비율**이다.
 # 사람마다 목 움직임이 다르고, 센서에서 멀어지면 같은 동작도 작게 찍히기 때문.
-NOD_AMPLITUDE_REL = 0.10
-NOD_AMPLITUDE_MIN = 0.04  # baseline 이 없거나 지나치게 작을 때의 하한
+# 실측 근거: 42행이 화각을 덮으므로 한 행이 대략 3cm 다. 졸음 꾸벅임은 머리가
+# 5~10cm 내려가니 2~3행이고, 0.10 x spread(0.7) = 3행이면 문턱이 꾸벅임 자체와
+# 같은 크기다 - 대부분이 안 세어져 빈도가 쌓이지 않았다. 1~2행으로 내린다.
+NOD_AMPLITUDE_REL = 0.06
+NOD_AMPLITUDE_MIN = 0.03  # baseline 이 없거나 지나치게 작을 때의 하한
 NOD_MIN_DOWN_S = 0.30    # 내려가 있던 시간이 이보다 짧으면 노이즈로 버린다
 # 조는 꾸벅임은 잠깐 떨어졌다 홱 올라온다. 키보드를 내려다보는 건 몇 초씩 머문다.
 # 그래서 오래 내려가 있던 하강은 꾸벅임으로 세지 않는다.
 NOD_MAX_DOWN_S = 2.5
 NOD_REFRACTORY_S = 0.8   # 직전 꾸벅임 이후 최소 간격
+DIP_LOOKBACK_S = 3.0     # 화면에 보여줄 '가장 깊었던 하강'을 찾는 창
 NOD_RATE_FULL = 12.0     # 분당 이 횟수면 졸음 기여도 최대 (라벨은 그 절반인 6회/분)
 # 관측 시간이 짧을 때 그 시간으로 나누면 빈도가 커진다 - 꾸벅임 1회를 2초로
 # 나누면 30회/분. 분모에 하한을 둬서 단발 숙임이 졸음으로 읽히지 않게 한다.
@@ -239,12 +243,16 @@ class NodDetector:
     _down_since: float | None = None
     _last_event: float = -1e9
     _abandoned: bool = False
+    # 진단용. 꾸벅임이 안 세어질 때 '문턱에 얼마나 모자랐나'를 볼 수 있어야 한다.
+    rest: float = float("nan")      # 창의 중앙값 = 지금의 기준 머리 높이
+    dip: float = 0.0                # 최근 DIP_LOOKBACK_S 안에서 가장 깊이 내려간 값
 
     def reset(self) -> None:
         self._hist.clear()
         self._events.clear()
         self._down_since = None
         self._abandoned = False
+        self.rest, self.dip = float("nan"), 0.0
 
     def update(self, now: float, top_row: float, present: bool, scale: float = 1.0) -> float:
         # 사람이 없으면 top_row 가 1.0 과 잔여값 사이를 튀어 가짜 꾸벅임이 쌓인다
@@ -262,6 +270,11 @@ class NodDetector:
 
         if len(self._hist) >= 8:
             rest = float(np.median([v for _, v in self._hist]))
+            self.rest = rest
+            # 지금 값이 아니라 최근 창에서 가장 깊었던 하강을 보여준다. 고개를 든
+            # 뒤에 읽으면 0 이라, 방금 꾸벅임이 문턱에 얼마나 모자랐는지 알 수 없다.
+            recent = [v for ts, v in self._hist if now - ts <= DIP_LOOKBACK_S]
+            self.dip = (max(recent) - rest) if recent else 0.0
             up = top_row < rest + self.amplitude * 0.3
             if self._abandoned:
                 if up:
@@ -461,6 +474,11 @@ class PostureTracker:
                 self._slump_since = now
         else:
             self._slump_since = None
+        # 꾸벅임이 왜 안 세어지는지 보이게 같이 실어 보낸다. nod/min 이 0 인 것만
+        # 보여서는 진폭이 모자란 건지 애초에 안 움직인 건지 알 수가 없었다.
+        verdict.parts["nod_dip"] = self.nods.dip
+        verdict.parts["nod_amp"] = self.nods.amplitude
+
         if verdict.parts.get("recline_raw", 0.0) >= RECLINE_ARM_AT:
             if self._recline_since is None:
                 self._recline_since = now
