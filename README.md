@@ -15,7 +15,9 @@ see [firmware/README.md](firmware/README.md) for the wiring and the order.
 ```bash
 # RP2040: hold BOOT, plug in, copy firmware/pico_esp32-cam_ftdi.uf2 to RPI-RP2
 # ESP32:  jumper GP3-GND, press its RST, then
-esptool --chip esp32 --port COM6 --baud 460800 write-flash -z   0x1000 firmware/bootloader.bin 0x8000 firmware/partitions.bin   0xe000 firmware/boot_app0.bin 0x10000 firmware/firmware.bin
+esptool --chip esp32 --port COM6 --baud 460800 write-flash -z \
+  0x1000 firmware/bootloader.bin 0x8000 firmware/partitions.bin \
+  0xe000 firmware/boot_app0.bin 0x10000 firmware/firmware.bin
 # then remove the jumper and press RST again - IO0 is the camera's XCLK
 
 uv run tools/posture_viewer.py --source esp        # lists the ports
