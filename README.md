@@ -6,6 +6,35 @@ follows the host's baud rate, and reproduces the DTR/RTS reset circuit esptool
 expects — so `esptool` and the Arduino IDE flash the ESP32 with no buttons
 pressed and no IO0 jumper.
 
+## Quick start
+
+Two boards to flash and one command to run. [firmware/](firmware/) holds both
+images already built, so none of the toolchains below are needed to try it -
+see [firmware/README.md](firmware/README.md) for the wiring and the order.
+
+```bash
+# RP2040: hold BOOT, plug in, copy firmware/pico_esp32-cam_ftdi.uf2 to RPI-RP2
+# ESP32:  jumper GP3-GND, press its RST, then
+esptool --chip esp32 --port COM6 --baud 460800 write-flash -z   0x1000 firmware/bootloader.bin 0x8000 firmware/partitions.bin   0xe000 firmware/boot_app0.bin 0x10000 firmware/firmware.bin
+# then remove the jumper and press RST again - IO0 is the camera's XCLK
+
+uv run tools/posture_viewer.py --source esp        # lists the ports
+uv run tools/posture_viewer.py --source esp --port COM7
+```
+
+Two COM ports appear. The one to give the viewer is **Vision Stream**,
+interface 2; interface 0 is the bridge esptool talks to. Running without
+`--port` prints both and says which is which.
+
+Then: SPACE and step out of shot, sit upright and press SPACE again, and it
+judges. [The posture section](#posture) covers what the panel is showing and
+what to do when the numbers look wrong.
+
+Without `uv`: `pip install pyserial numpy opencv-python` and run
+`tools/posture_viewer.py` with any Python 3.10+.
+
+## The bridge
+
 The UART is on PIO, not either hardware UART, so **all four signal pins are
 free choices**: edit the defines at the top of
 [pico_esp32-cam_ftdi.c](pico_esp32-cam_ftdi.c) and rewire. Both hardware UARTs
